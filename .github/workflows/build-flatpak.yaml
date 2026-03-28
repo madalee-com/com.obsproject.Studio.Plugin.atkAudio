@@ -12,7 +12,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6.6
@@ -20,3 +20,21 @@ jobs:
           bundle: atkAudio
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [flatpak]
+    steps:
+      - name: Download all workflow run artifacts
+        uses: actions/download-artifact@v5
+      - name: Rename release file
+        run: |
+          mv atkAudio atkAudioForOBS-0.31.15.flatpak
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: atkAudio Plugin for OBS Flatpak 0.31.15
+          preserve_order: true
+          files: |
+            atkAudioForOBS-0.31.15.flatpak
