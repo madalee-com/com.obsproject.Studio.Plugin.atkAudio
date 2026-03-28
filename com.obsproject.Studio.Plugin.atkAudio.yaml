@@ -15,20 +15,23 @@ modules:
     buildsystem: simple
     build-commands:
       - |
-        cd _build/_deps/juce-src
-        patch -p1 -N -i ../../../0001-fix-add-flathub-PATHS-to-JUCE.patch
+        mkdir packages
+        cd _deps/juce-src
+        patch -p1 -N --binary < ../../0001-fix-add-flathub-PATHS-to-JUCE.patch
+      - sed -i '/include(CTest)/c\# include(CTest)' CMakeLists.txt
+      - sed -i '/add_subdirectory(tests)/c\# add_subdirectory(tests)' CMakeLists.txt
       - cmake -S . -B _build -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="${FLATPAK_DEST}" -DFETCHCONTENT_FULLY_DISCONNECTED=ON --compile-no-warning-as-error
-      - cmake --build _build -j --config Release
+      - cmake --build _build -j4 --config Release
     post-install:
       - install -Dm644 ${FLATPAK_ID}.metainfo.xml -t ${FLATPAK_DEST}/share/metainfo
     sources:
-      - type: archive
-        url: https://github.com/atkAudio/PluginForObsRelease/archive/refs/tags/0.25.3.tar.gz
-        sha256: 2aa05d5bbfebd6ca9df535d709f8aa0681aca96d6521bd1607063254bfa993ff
+      - type: git
+        url: https://github.com/atkAudio/PluginForObsRelease.git
+        branch: main
       - type: git
         url: https://github.com/juce-framework/JUCE.git
-        commit: 1b460fe0895635a2ab8ac5c00cb5575e33e5dc1e
-        dest: _build/_deps/juce-src
+        tag: 8.0.12
+        dest: _deps/juce-src
       - type: file
         path: com.obsproject.Studio.Plugin.atkAudio.metainfo.xml
       - type: file
