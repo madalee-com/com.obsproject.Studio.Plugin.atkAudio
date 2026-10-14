@@ -21,6 +21,9 @@ modules:
       - -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
+      # atkAudio 0.35.0's CMakeLists does `if(BUILD_TESTING) add_subdirectory(tests)` but ships no tests/ dir,
+      # and CI fetches JUCE shallow (depth=1) so this guard must be disabled to configure successfully.
+      - -DBUILD_TESTING=OFF
       - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
       - -DQT_DIR=/usr/lib/qt6/lib/cmake/Qt6
     build-commands:
