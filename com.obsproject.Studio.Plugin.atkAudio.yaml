@@ -1,38 +1,51 @@
-id: com.obsproject.Studio.Plugin.atkAudio
+app-id: com.obsproject.Studio.Plugin.atkAudio
 branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
-sdk: org.kde.Sdk//6.8
+sdk: org.freedesktop.Sdk//25.08
+command: obs
 build-extension: true
 separate-locales: false
+# The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback),
+# and the SDK provides Qt6 Widgets/Core. No separate module is required.
+
 build-options:
   prefix: /app/plugins/atkAudio
   cflags: -Wno-error
-  strip: true
 
 modules:
   - name: atkaudio-plugin
-    buildsystem: simple
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
+      - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+      - -DQT_DIR=/usr/lib/qt6/lib/cmake/Qt6
     build-commands:
       - |
         mkdir packages
+        # atkAudio 0.35.0 bundles JUCE via FetchContent (GIT_TAG 9.0.3) but reuses a pre-existing
+        # _deps/juce-src checkout when present. Pre-place the patched JUCE 9.0.3 there so no
+        # network fetch occurs and the /app/extensions/Plugins patch is baked in before configure.
         cd _deps/juce-src
-        patch -p1 -N --binary < ../../0001-fix-add-flathub-PATHS-to-JUCE.patch
-      - sed -i '/include(CTest)/c\# include(CTest)' CMakeLists.txt
-      - sed -i '/add_subdirectory(tests)/c\# add_subdirectory(tests)' CMakeLists.txt
-      - cmake -S . -B _build -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="${FLATPAK_DEST}" -DFETCHCONTENT_FULLY_DISCONNECTED=ON --compile-no-warning-as-error
-      - cmake --build _build -j4 --config Release
+        patch -p1 --binary < ../../0001-fix-add-flathub-PATHS-to-JUCE.patch
     post-install:
-      - install -Dm644 ${FLATPAK_ID}.metainfo.xml -t ${FLATPAK_DEST}/share/metainfo
+      - |
+        install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins ${FLATPAK_ID}.so
+        install -Dm644 --target-directory=${FLATPAK_DEST}/share/metainfo ${FLATPAK_ID}.metainfo.xml
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
-        branch: main
+        tag: 0.35.0
+        # atkAudio's root CMakeLists does add_subdirectory(src) and builds a MODULE lib + main plugin lib.
       - type: git
         url: https://github.com/juce-framework/JUCE.git
-        tag: 8.0.12
+        tag: 9.0.3
         dest: _deps/juce-src
-      - type: file
-        path: com.obsproject.Studio.Plugin.atkAudio.metainfo.xml
+      # Patch JUCE 9.0.3 to add the flatpak /app/extensions/Plugins/* default search paths.
       - type: file
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch
+      - type: file
+        path: com.obsproject.Studio.Plugin.atkAudio.metainfo.xml

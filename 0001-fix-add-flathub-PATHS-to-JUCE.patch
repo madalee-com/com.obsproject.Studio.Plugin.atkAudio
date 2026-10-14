@@ -1,72 +1,72 @@
 diff --git a/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h b/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
-index 796d16ffb8..8cce613790 100644
+index a3f21d9123..e1e3d81c7f 100644
 --- a/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
 +++ b/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
-@@ -71,6 +71,7 @@
+@@ -72,6 +72,7 @@
      "~/.lv2"                        LILV_PATH_SEP \
      "/usr/local/lib/lv2"            LILV_PATH_SEP \
      "/usr/lib/lv2"                  LILV_PATH_SEP \
-+    "/app/extensions/Plugins"       LILV_PATH_SEP \
++/app/extensions/Plugins LILV_PATH_SEP \
      "/Library/Audio/Plug-Ins/LV2"
   #elif JUCE_WINDOWS
    #define LILV_DEFAULT_LV2_PATH \
 diff --git a/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp b/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
-index dede487704..f91aa2cb7c 100644
+index e0eec853ba..92b01d7f71 100644
 --- a/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
 +++ b/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
 @@ -719,7 +719,7 @@ void LADSPAPluginFormatHeadless::recursiveFileSearch (StringArray& results, cons
  
  FileSearchPath LADSPAPluginFormatHeadless::getDefaultLocationsToSearch()
  {
--    return  { SystemStats::getEnvironmentVariable ("LADSPA_PATH", "/usr/lib/ladspa;/usr/local/lib/ladspa;~/.ladspa").replace (":", ";") };
-+    return  { SystemStats::getEnvironmentVariable ("LADSPA_PATH", "/app/extensions/Plugins;/usr/lib/ladspa;/usr/local/lib/ladspa;~/.ladspa").replace (":", ";") };
+-    FileSearchPath result { SystemStats::getEnvironmentVariable ("LADSPA_PATH", "").replace (":", ";") };
++    FileSearchPath result { SystemStats::getEnvironmentVariable ("LADSPA_PATH", "/app/extensions/Plugins").replace (":", ";") };
+     result.addPath ({ "~/.ladspa;/usr/local/lib/ladspa;/usr/lib/ladspa" });
+     return result;
  }
- 
- } // namespace juce
 diff --git a/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h b/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
-index df33f87673..5662855044 100644
+index d6b941f905..bac4590411 100644
 --- a/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
 +++ b/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
-@@ -4301,12 +4301,14 @@ public:
-       #else
-        #if JUCE_64BIT
-         if (File ("/usr/lib64/lv2").exists() || File ("/usr/local/lib64/lv2").exists())
--            return { "~/.lv2;"
-+            return { "/app/extensions/Plugins;"
-+                     "~/.lv2;"
-                      "/usr/lib64/lv2;"
-                      "/usr/local/lib64/lv2" };
-        #endif
+@@ -4310,12 +4310,14 @@ public:
+           #else
+            #if JUCE_64BIT
+             if (File ("/usr/lib64/lv2").exists() || File ("/usr/local/lib64/lv2").exists())
+-                return { "~/.lv2;"
++return { /app/extensions/Plugins;
++                     "~/.lv2";
+                          "/usr/local/lib64/lv2;"
+                          "/usr/lib64/lv2" };
+            #endif
  
--        return { "~/.lv2;"
-+        return { "/app/extensions/Plugins;"
-+                 "~/.lv2;"
-                  "/usr/lib/lv2;"
-                  "/usr/local/lib/lv2" };
-       #endif
+-            return { "~/.lv2;"
++return { /app/extensions/Plugins;
++                         "~/.lv2";
+                      "/usr/local/lib/lv2;"
+                      "/usr/lib/lv2" };
+           #endif
 diff --git a/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp b/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
-index b03f8cb120..e77263a259 100644
+index cef9131b31..db8d59edd2 100644
 --- a/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
 +++ b/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
-@@ -162,7 +162,7 @@ FileSearchPath VST3PluginFormatHeadless::getDefaultLocationsToSearch()
-    #elif JUCE_MAC
-     return FileSearchPath ("~/Library/Audio/Plug-Ins/VST3;/Library/Audio/Plug-Ins/VST3");
-    #else
--    return FileSearchPath ("~/.vst3/;/usr/lib/vst3/;/usr/local/lib/vst3/");
-+    return FileSearchPath ("/app/extensions/Plugins;~/.vst3/;/usr/lib/vst3/;/usr/local/lib/vst3/");
-    #endif
- }
+@@ -161,7 +161,7 @@ FileSearchPath VST3PluginFormatHeadless::getDefaultLocationsToSearch()
+             return { "~/.vst3/;/usr/local/lib64/vst3/;/usr/lib64/vst3/" };
+        #endif
+ 
+-        return { "~/.vst3/;/usr/local/lib/vst3/;/usr/lib/vst3/" };
++        return { "/app/extensions/Plugins;~/.vst3/;/usr/local/lib/vst3/;/usr/lib/vst3/" };
+       #endif
+     });
  
 diff --git a/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp b/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
-index c877ed86fd..d9de946b9e 100644
+index 969d17dbf7..bb5f812bc9 100644
 --- a/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
 +++ b/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
-@@ -171,7 +171,7 @@ FileSearchPath VSTPluginFormatHeadless::getDefaultLocationsToSearch()
-     return FileSearchPath ("~/Library/Audio/Plug-Ins/VST;/Library/Audio/Plug-Ins/VST");
-    #elif JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
-     return FileSearchPath (SystemStats::getEnvironmentVariable ("VST_PATH",
--                                                                "/usr/lib/vst;/usr/local/lib/vst;~/.vst")
-+                                                                "/app/extensions/Plugins;/usr/lib/vst;/usr/local/lib/vst;~/.vst")
-                              .replace (":", ";"));
-    #elif JUCE_WINDOWS
-     auto programFiles = File::getSpecialLocation (File::globalApplicationsDirectory).getFullPathName();
+@@ -172,7 +172,7 @@ FileSearchPath VSTPluginFormatHeadless::getDefaultLocationsToSearch()
+        #if JUCE_MAC
+         return { "~/Library/Audio/Plug-Ins/VST;/Library/Audio/Plug-Ins/VST" };
+        #elif JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+-        return { "/usr/lib/vst;/usr/local/lib/vst;~/.vst" };
++        return { "/app/extensions/Plugins;/usr/lib/vst;/usr/local/lib/vst;~/.vst" };
+        #elif JUCE_WINDOWS
+         auto programFiles = File::getSpecialLocation (File::globalApplicationsDirectory).getFullPathName();
+ 

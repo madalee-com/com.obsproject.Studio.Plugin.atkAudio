@@ -26,12 +26,12 @@ jobs:
         uses: actions/download-artifact@v5
       - name: Rename release file
         run: |
-          mv atkAudio atkAudioForOBS-0.31.15.flatpak
+          mv atkAudio atkAudioForOBS-0.35.0.flatpak
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          name: atkAudio Plugin for OBS Flatpak 0.31.15
+          name: atkAudio Plugin for OBS Flatpak 0.35.0
           preserve_order: true
           files: |
-            atkAudioForOBS-0.31.15.flatpak
+            atkAudioForOBS-0.35.0.flatpak
