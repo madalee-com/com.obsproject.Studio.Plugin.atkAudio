@@ -44,6 +44,7 @@ modules:
         tag: 9.0.3
         dest: _deps/juce-src
       # Inline patch JUCE 9.0.3 to add the flatpak /app/extensions/Plugins/* default search paths.
-      # Applied by flatpak against the fetched JUCE module before atkAudio's FetchContent uses it.
+      # Applied by flatpak (patch -p0, repo-relative paths) against the fetched JUCE module before
+      # atkAudio's FetchContent reuses it. Plain unified diff, no git a/ b/ prefixes.
       - type: patch
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch
