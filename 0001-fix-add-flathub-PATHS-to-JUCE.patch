@@ -6,7 +6,7 @@
      "~/.lv2"                        LILV_PATH_SEP \
      "/usr/local/lib/lv2"            LILV_PATH_SEP \
      "/usr/lib/lv2"                  LILV_PATH_SEP \
-+/app/extensions/Plugins LILV_PATH_SEP \
++"/app/extensions/Plugins" LILV_PATH_SEP \
      "/Library/Audio/Plug-Ins/LV2"
   #elif JUCE_WINDOWS
    #define LILV_DEFAULT_LV2_PATH \
@@ -36,13 +36,13 @@
             #if JUCE_64BIT
              if (File ("/usr/lib64/lv2").exists() || File ("/usr/local/lib64/lv2").exists())
 -                return { "~/.lv2;"
-+                return { /app/extensions/Plugins; "~/.lv2;"
++                return { "/app/extensions/Plugins;~/.lv2;"
                           "/usr/local/lib64/lv2;"
                           "/usr/lib64/lv2" };
             #endif
  
 -            return { "~/.lv2;"
-+            return { /app/extensions/Plugins; "~/.lv2;"
++            return { "/app/extensions/Plugins;~/.lv2;"
                       "/usr/local/lib/lv2;"
                       "/usr/lib/lv2" };
            #endif
