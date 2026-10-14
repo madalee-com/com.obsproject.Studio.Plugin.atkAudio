@@ -1,5 +1,5 @@
---- modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
-+++ modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
+--- a/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
++++ b/modules/juce_audio_processors_headless/format_types/LV2_SDK/juce_lv2_config.h
 @@ -70,10 +70,11 @@
    #define LILV_DEFAULT_LV2_PATH \
      "~/Library/Audio/Plug-Ins/LV2"  LILV_PATH_SEP \
@@ -12,8 +12,8 @@
    #define LILV_DEFAULT_LV2_PATH \
      "%APPDATA%\\LV2"                LILV_PATH_SEP \
      "%COMMONPROGRAMFILES%\\LV2"
---- modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
-+++ modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
+--- a/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
++++ b/modules/juce_audio_processors_headless/format_types/juce_LADSPAPluginFormatHeadless.cpp
 @@ -717,11 +717,11 @@
      }
  }
@@ -27,8 +27,8 @@
  }
  
  } // namespace juce
---- modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
-+++ modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
+--- a/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
++++ b/modules/juce_audio_processors_headless/format_types/juce_LV2PluginFormatImpl.h
 @@ -4308,16 +4308,16 @@
              const auto programFiles = File::getSpecialLocation (File::windowsProgramFilesCommon).getFullPathName();
              return { localAppData + "\\LV2;" + programFiles + "\\LV2" };
@@ -48,8 +48,8 @@
            #endif
          });
  
---- modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
-+++ modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
+--- a/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
++++ b/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
 @@ -156,14 +156,14 @@
        #elif JUCE_MAC
          return { "~/Library/Audio/Plug-Ins/VST3;/Library/Audio/Plug-Ins/VST3" };
@@ -67,8 +67,8 @@
  
      FileSearchPath result { SystemStats::getEnvironmentVariable ("VST3_PATH", "").replace (":", ";") };
      result.addPath (defaults);
---- modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
-+++ modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
+--- a/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
++++ b/modules/juce_audio_processors_headless/format_types/juce_VSTPluginFormatHeadless.cpp
 @@ -170,11 +170,11 @@
      auto defaults = std::invoke ([]() -> FileSearchPath
      {
