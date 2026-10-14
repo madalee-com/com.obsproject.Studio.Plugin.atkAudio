@@ -22,22 +22,18 @@ modules:
       - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
       # atkAudio 0.35.0's CMakeLists does `if(BUILD_TESTING) add_subdirectory(tests)` but ships no tests/ dir,
-      # and CI fetches JUCE shallow (depth=1) so this guard must be disabled to configure successfully.
+      # so this guard must be disabled to configure successfully.
       - -DBUILD_TESTING=OFF
+      # JUCE is pre-fetched as the _deps/juce-src module above and patched inline; force FetchContent to
+      # reuse that existing checkout instead of attempting a network fetch (fails in sandboxed CI).
       - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
       - -DQT_DIR=/usr/lib/qt6/lib/cmake/Qt6
     build-commands:
       - |
         mkdir packages
-        # atkAudio 0.35.0 bundles JUCE via FetchContent (GIT_TAG 9.0.3) but reuses a pre-existing
-        # _deps/juce-src checkout when present. Pre-place the patched JUCE 9.0.3 there so no
-        # network fetch occurs and the /app/extensions/Plugins patch is baked in before configure.
-        cd _deps/juce-src
-        patch -p1 --binary < ../../0001-fix-add-flathub-PATHS-to-JUCE.patch
     post-install:
       - |
         install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins ${FLATPAK_ID}.so
-        install -Dm644 --target-directory=${FLATPAK_DEST}/share/metainfo ${FLATPAK_ID}.metainfo.xml
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
@@ -47,8 +43,7 @@ modules:
         url: https://github.com/juce-framework/JUCE.git
         tag: 9.0.3
         dest: _deps/juce-src
-      # Patch JUCE 9.0.3 to add the flatpak /app/extensions/Plugins/* default search paths.
-      - type: file
+      # Inline patch JUCE 9.0.3 to add the flatpak /app/extensions/Plugins/* default search paths.
+      # Applied by flatpak against the fetched JUCE module before atkAudio's FetchContent uses it.
+      - type: patch
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch
-      - type: file
-        path: com.obsproject.Studio.Plugin.atkAudio.metainfo.xml
