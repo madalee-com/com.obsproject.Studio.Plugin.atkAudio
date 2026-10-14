@@ -33,7 +33,9 @@ modules:
         mkdir packages
     post-install:
       - |
-        install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins ${FLATPAK_ID}.so
+        # Release tag name is 'atkaudio-pluginforobs' (buildspec.json), not the app-id;
+        # CMake builds atkaudio-pluginforobs.so, so install that artifact.
+        install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins atkaudio-pluginforobs.so
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
