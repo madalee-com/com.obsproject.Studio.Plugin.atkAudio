@@ -3,7 +3,8 @@ branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
 sdk: org.freedesktop.Sdk//25.08
-command: obs
+# build-extension produces a runtime extension, not an app; it has no runnable command,
+# so `command:` must be omitted (setting it caused flatpak-builder to fail at "Command 'obs' not found").
 build-extension: true
 separate-locales: false
 # The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback),
