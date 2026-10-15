@@ -7,14 +7,45 @@ sdk: org.freedesktop.Sdk//25.08
 # so `command:` must be omitted (setting it caused flatpak-builder to fail at "Command 'obs' not found").
 build-extension: true
 separate-locales: false
-# The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback),
-# and the SDK provides Qt6 Widgets/Core. No separate module is required.
+# The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback).
+# Qt6 is provided by a `qt6` module built from source below and installed into /app; the plugin links THAT
+# build (same obs-deps-built ABI as OBS's runtime) instead of the SDK's divergent /usr/lib/qt6 build.
 
 build-options:
   prefix: /app/plugins/atkAudio
   cflags: -Wno-error
 
 modules:
+  # Build obs-deps-ABI-matching Qt 6.11.1 from source into /app. OBS's flatpak bundles this exact Qt
+  # (obsproject/obs-deps 2026-08-26); no Linux prebuilt exists, so we rebuild it here in flatpak-builder.
+  # The plugin then links THIS copy via CMAKE_PREFIX_PATH=/app + QT_DIR, giving one consistent Qt build
+  # in-process and eliminating the JUCE Component vtable drift that crashes juce::Component::centreWithSize.
+  - name: qt6
+    buildsystem: cmake-buildsystem
+    no-autogen: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/app
+      - -DBUILD_WITH_PRL=OFF
+      - -DQT_BUILD_TESTS=OFF
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DINSTALL_DOCS=OFF
+      # xcb platform plugin (Linux windowing). OpenGL for JUCE rendering. ICU + fontconfig from build-deps.
+      - -DQT_FEATURE_opengl=on
+      - -DQT_FEATURE_opengles3=on
+      - -DQT_FEATURE_xcb=true
+      - -DCMAKE_CXX_STANDARD=17
+    build-options:
+      env:
+        MAKEFLAGS: "-j$(nproc)"
+    modules:
+      - name: qt6-sdk-deps
+        buildsystem: simple
+        build-commands: []
+    build-deps:
+      # Qt xcb/GL/icu/alsa/dbus dev headers provided by the org.freedesktop.Sdk extension.
+      - gtk3
+
   - name: atkaudio-plugin
     buildsystem: cmake-ninja
     builddir: true
@@ -28,24 +59,16 @@ modules:
       # JUCE is pre-fetched as the _deps/juce-src module above and patched inline; force FetchContent to
       # reuse that existing checkout instead of attempting a network fetch (fails in sandboxed CI).
       - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
-      # Pin the Qt6 ABI JUCE is compiled against to the 6.11 minor that OBS Studio's flatpak
-      # bundles (libQt6Core.so.6 reports "Qt 6.11.1"). Without a version, find_package(Qt6) accepts
-      # any 6.x from the SDK; binding at runtime then pulls in OBS's differently-built Qt and its
-      # JUCE-Component ABI drifts -> segfault in juce::Component::centreWithSize on filter apply.
-      # -DCMAKE_PREFIX_PATH makes find_package(Qt6) resolve against this exact Qt install; adding
-      # VERSION 6.11 makes configure FAIL loudly if the SDK's Qt ever lands on a different minor.
-      - -DQt6_VERSION=6.11
-      # OBS's bundled Qt is 6.11.1 (obsproject/obs-deps, built by the OBS maintainers). The plugin's
-      # buildspec already downloads that SAME obs-deps Qt6 for Windows, where atk_configure_qt_paths()
-      # makes JUCE link it -> identical ABI to OBS's runtime Qt, so no crash. On Linux that function
-      # returns early (WIN32 gate), so JUCE instead compiles against the SDK's /usr/lib/qt6 Qt: a
-      # different build than OBS 6.11.1. Same-version-but-different-Qt-in-one-process drift crashes
-      # juce::Component::centreWithSize on filter apply. Patching find_package to require VERSION 6.11
-      # only fails the build if the SDK minor differs; it does NOT change which Qt build is linked, so
-      # it can't close the drift. The real root fix (linking obs-deps Qt on Linux) needs an obs-deps
-      # Linux Qt6 bundle, which doesn't exist -- see patch 0003, which instead stops the drift crash by
-      # deferring window-geometry construction off the OBS module thread onto the JUCE message thread.
-      - -DQT_DIR=/usr/lib/qt6/lib/cmake/Qt6
+      # Root fix for the Qt ABI drift crash: OBS's flatpak bundles obs-deps' own Qt 6.11.1 (verified from
+      # obsproject/obs-deps release 2026-08-26; NO Linux prebuilt exists, only mac/win). That build is
+      # produced by a `qt6` module built in this same flatpak-builder run and installed under /app. Point
+      # find_package(Qt6 Widgets Core REQUIRED) at it via CMAKE_PREFIX_PATH=/app + QT_DIR so JUCE links the
+      # SAME obs-deps-built Qt6 ABI OBS uses at runtime -> one Qt build in-process -> no JUCE Component vtable
+      # drift -> centreWithSize stops segfaulting. The SDK /usr/lib/qt6 build is the drift source and is not
+      # used (the old -DQT_DIR=/usr/lib/qt6 line was removed). Patch 0003 still defers MainHostWindow
+      # construction off the OBS module thread as a safety net.
+      - -DCMAKE_PREFIX_PATH=/app
+      - -DQT_DIR=/app/lib/cmake/Qt6
     build-commands:
       - |
         mkdir packages
