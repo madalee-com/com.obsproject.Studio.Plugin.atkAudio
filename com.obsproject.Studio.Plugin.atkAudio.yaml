@@ -28,6 +28,23 @@ modules:
       # JUCE is pre-fetched as the _deps/juce-src module above and patched inline; force FetchContent to
       # reuse that existing checkout instead of attempting a network fetch (fails in sandboxed CI).
       - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+      # Pin the Qt6 ABI JUCE is compiled against to the 6.11 minor that OBS Studio's flatpak
+      # bundles (libQt6Core.so.6 reports "Qt 6.11.1"). Without a version, find_package(Qt6) accepts
+      # any 6.x from the SDK; binding at runtime then pulls in OBS's differently-built Qt and its
+      # JUCE-Component ABI drifts -> segfault in juce::Component::centreWithSize on filter apply.
+      # -DCMAKE_PREFIX_PATH makes find_package(Qt6) resolve against this exact Qt install; adding
+      # VERSION 6.11 makes configure FAIL loudly if the SDK's Qt ever lands on a different minor.
+      - -DQt6_VERSION=6.11
+      # OBS's bundled Qt is 6.11.1 (obsproject/obs-deps, built by the OBS maintainers). The plugin's
+      # buildspec already downloads that SAME obs-deps Qt6 for Windows, where atk_configure_qt_paths()
+      # makes JUCE link it -> identical ABI to OBS's runtime Qt, so no crash. On Linux that function
+      # returns early (WIN32 gate), so JUCE instead compiles against the SDK's /usr/lib/qt6 Qt: a
+      # different build than OBS 6.11.1. Same-version-but-different-Qt-in-one-process drift crashes
+      # juce::Component::centreWithSize on filter apply. Patching find_package to require VERSION 6.11
+      # only fails the build if the SDK minor differs; it does NOT change which Qt build is linked, so
+      # it can't close the drift. The real root fix (linking obs-deps Qt on Linux) needs an obs-deps
+      # Linux Qt6 bundle, which doesn't exist -- see patch 0003, which instead stops the drift crash by
+      # deferring window-geometry construction off the OBS module thread onto the JUCE message thread.
       - -DQT_DIR=/usr/lib/qt6/lib/cmake/Qt6
     build-commands:
       - |
@@ -50,5 +67,11 @@ modules:
       # flatpak-builder extracts every module source into one build dir and runs `patch -p1` from
       # there; JUCE was fetched to _deps/juce-src, so each git header is prefixed with that path
       # (`a/_deps/juce-src/modules/...`) so `-p1` resolves it relative to the build root.
+      - type: patch
+        path: 0003-defer-main-window-construction-to-message-thread.patch
+      # Defer MainHostWindow window-peer/geometry construction off the OBS module thread onto the
+      # JUCE message thread. On Linux these ops (setResizable, centreWithSize->setBoundsConstrained,
+      # restoreWindowStateFromString) crash at plugin init before a consistent Qt GUI context exists.
+      # flatpak-builder applies patches with `patch -p1` from the build root, so headers are b/... paths.
       - type: patch
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch

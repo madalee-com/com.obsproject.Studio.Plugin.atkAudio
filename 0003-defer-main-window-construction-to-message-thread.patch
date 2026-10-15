@@ -1,0 +1,54 @@
+diff --git a/src/core/atkaudio/PluginHost2/Editor/MainHostWindow.cpp b/src/core/atkaudio/PluginHost2/Editor/MainHostWindow.cpp
+index bbb93c0..5cec1d4 100644
+--- a/src/core/atkaudio/PluginHost2/Editor/MainHostWindow.cpp
++++ b/src/core/atkaudio/PluginHost2/Editor/MainHostWindow.cpp
+@@ -125,17 +125,41 @@ MainHostWindow::MainHostWindow(juce::AudioDeviceManager& deviceManagerIn)
+     }
+ #endif
+ 
+-    setResizable(true, false);
+-    setResizeLimits(500, 400, 10000, 10000);
+-    centreWithSize(800, 600);
++    // The operations below create/adjust top-level QWidget peers and query screen
++    // geometry (setResizable, centreWithSize -> ResizableWindow::setBoundsConstrained,
++    // restoreWindowStateFromString). On Linux these crash during plugin init when run
++    // on the OBS module thread before a consistent Qt GUI context exists: this plugin's
++    // JUCE is built against the SDK Qt, while the process is driven by OBS's bundled Qt.
++    // Defer them to the JUCE message thread, where a valid QGuiApplication and a running
++    // event loop are guaranteed. This mirrors how PluginHost2 defers teardown via
++    // atkAudioModule::destroyOnMessageThread.
++    auto deferGeometryToMessageThread = [this]()
++    {
++        setResizable(true, false);
++        setResizeLimits(500, 400, 10000, 10000);
++        centreWithSize(800, 600);
+ 
+-    // Load plugin list from shared file before creating graph
+-    atk::SharedPluginList::getInstance()->loadPluginList(knownPluginList);
++        // Position title bar buttons on the right (Windows-style), like Plugin Host
++        setTitleBarButtonsRequired(DocumentWindow::allButtons, false);
++        restoreWindowStateFromString(getAppProperties().getValue("mainWindowPos"));
++    };
+ 
+-    // Position title bar buttons on the right (Windows-style), like Plugin Host
+-    setTitleBarButtonsRequired(DocumentWindow::allButtons, false);
++    {
++        auto* mm = juce::MessageManager::getInstance();
++        if (mm->isThisTheMessageThread())
++        {
++            deferGeometryToMessageThread();
++        }
++        else if (!mm->callAsync(deferGeometryToMessageThread))
++        {
++            atk::logging::warning("MainHostWindow::ctor", "failed to post deferred geometry ops");
++            deferGeometryToMessageThread();
++        }
++    }
+ 
+-    restoreWindowStateFromString(getAppProperties().getValue("mainWindowPos"));
++    // Load plugin list from shared file before creating graph (synchronous: the
++    // PluginGraph built in PluginHost2::ctor depends on knownPluginList being populated).
++    atk::SharedPluginList::getInstance()->loadPluginList(knownPluginList);
+ 
+     InternalPluginFormat* internalFormat = nullptr;
+     for (auto* format : formatManager.getFormats())
