@@ -35,9 +35,13 @@ jobs:
     needs: [flatpak]
     steps:
       # Check out the repo so we can read the manifest (for the version) and build
-      # the changelog from git history. Plain checkout at the workflow ref is enough;
-      # a hardcoded `ref:` broke on workflow_dispatch (no inputs).
+      # the changelog from git history. fetch-depth: 0 is required so `git log` has
+      # full history; the default shallow depth-1 clone yields only HEAD, producing an
+      # empty changelog body. Plain checkout at the workflow ref is enough; a hardcoded
+      # `ref:` broke on workflow_dispatch (no inputs).
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Derive version from manifest
         id: version
         run: |
