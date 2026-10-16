@@ -64,7 +64,7 @@ jobs:
             echo
             echo "## Changelog"
             echo
-            git log --pretty=format:'- %s (%h)' -r $RANGE | head -60
+            git log --pretty=format:'- %s (%h)' -n 60 $RANGE
           } > CHANGELOG_BODY.md
       - name: Publish release
         uses: softprops/action-gh-release@v2
