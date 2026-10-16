@@ -66,9 +66,6 @@ jobs:
             echo
             git log --pretty=format:'- %s (%h)' -r $RANGE | head -60
           } > CHANGELOG_BODY.md
-          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
-          cat CHANGELOG_BODY.md >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
