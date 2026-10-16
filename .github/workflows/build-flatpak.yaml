@@ -75,7 +75,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: atkAudio Plugin for OBS Flatpak ${{ steps.version.outputs.version }}
-          body_file: CHANGELOG_BODY.md
+          body_path: CHANGELOG_BODY.md
           draft: false
           prerelease: false
           make_latest: true
