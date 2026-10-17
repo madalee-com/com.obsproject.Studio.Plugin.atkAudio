@@ -24,7 +24,12 @@ modules:
       # Release build type omits the -g flag, so no .debug_* sections (debug symbols) are emitted. This replaced
       # RelWithDebInfo, which added -g and left debug symbols in the plugin. The flatpak-builder action does not
       # support a `strip` input (it warns "Unexpected input(s) 'strip'"), so stripping is handled here at build time.
-      - -DCMAKE_BUILD_TYPE=Release
+      # atkAudio's CMakeLists.txt AND cmake/common/bootstrap.cmake both FORCE the default to RelWithDebInfo via
+      # `set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING ... FORCE)` guarded by `if(NOT CMAKE_BUILD_TYPE)`. A
+      # plain `-DCMAKE_BUILD_TYPE=Release` already defeats that guard (the cache var is set), but we also FORCE it to
+      # be certain, and unset ATK_DEBUG so the upstream target_policies.cmake gate can't add -g.
+      - -DCMAKE_BUILD_TYPE:STRING=Release
+      - -DATK_DEBUG=OFF
       - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
       # atkAudio 0.35.0's CMakeLists does `if(BUILD_TESTING) add_subdirectory(tests)` but ships no tests/ dir,
