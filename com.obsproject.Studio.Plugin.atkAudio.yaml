@@ -21,7 +21,9 @@ modules:
     buildsystem: cmake-ninja
     builddir: true
     config-opts:
-      # Release (no -g debug symbols; RelWithDebInfo previously left them in). strip: true below removes any remaining symbol table.
+      # Release build type omits the -g flag, so no .debug_* sections (debug symbols) are emitted. This replaced
+      # RelWithDebInfo, which added -g and left debug symbols in the plugin. The flatpak-builder action does not
+      # support a `strip` input (it warns "Unexpected input(s) 'strip'"), so stripping is handled here at build time.
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
