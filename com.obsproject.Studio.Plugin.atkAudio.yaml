@@ -33,8 +33,7 @@ modules:
       # Qt6: JUCE's CMakeLists does `find_package(Qt6 Widgets Core REQUIRED)` with no inline VERSION, so on
       # Linux it links the SDK Qt at /usr/lib/qt6 — the only Linux Qt, which a build-extension also has at
       # runtime. Build-time Qt == runtime Qt => no ABI drift; these lines were the old (ignored) Option-1
-      # attempt to rebuild obs-deps Qt into /app and are removed. Patch 0003 below still defers MainHostWindow
-      # geometry construction off the OBS module thread onto the JUCE message thread (the real fix).
+      # attempt to rebuild obs-deps Qt into /app and are removed.
     build-commands:
       - |
         mkdir packages
@@ -56,11 +55,5 @@ modules:
       # flatpak-builder extracts every module source into one build dir and runs `patch -p1` from
       # there; JUCE was fetched to _deps/juce-src, so each git header is prefixed with that path
       # (`a/_deps/juce-src/modules/...`) so `-p1` resolves it relative to the build root.
-      - type: patch
-        path: 0003-defer-main-window-construction-to-message-thread.patch
-      # Defer MainHostWindow window-peer/geometry construction off the OBS module thread onto the
-      # JUCE message thread. On Linux these ops (setResizable, centreWithSize->setBoundsConstrained,
-      # restoreWindowStateFromString) crash at plugin init before a consistent Qt GUI context exists.
-      # flatpak-builder applies patches with `patch -p1` from the build root, so headers are b/... paths.
       - type: patch
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch
