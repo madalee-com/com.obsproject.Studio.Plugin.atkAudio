@@ -29,6 +29,7 @@ jobs:
           bundle: atkAudio
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
+          strip: true
 
   release:
     runs-on: ubuntu-latest

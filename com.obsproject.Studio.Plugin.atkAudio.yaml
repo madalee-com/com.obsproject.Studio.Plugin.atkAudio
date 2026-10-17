@@ -21,7 +21,8 @@ modules:
     buildsystem: cmake-ninja
     builddir: true
     config-opts:
-      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      # Release (no -g debug symbols; RelWithDebInfo previously left them in). strip: true below removes any remaining symbol table.
+      - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
       # atkAudio 0.35.0's CMakeLists does `if(BUILD_TESTING) add_subdirectory(tests)` but ships no tests/ dir,
