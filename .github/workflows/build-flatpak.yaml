@@ -26,9 +26,29 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
         with:
-          bundle: atkAudio
+          # Do NOT let the action auto-bundle: its `flatpak build-bundle --runtime --runtime-repo=<flathub>`
+          # emits a static-delta ostree bundle (deltas/av/0..4 + update metadata) that bloats the release
+          # artifact to ~100-117MB. We build the extension ourselves below and emit a plain ~17MB bundle.
+          build-bundle: false
+          build-debug-bundle: false
+          repo-dir: repo
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
+      # Emit a plain extension bundle WITHOUT --runtime-repo, so flatpak does NOT generate static deltas /
+      # update metadata. Result is a single .files layer (~17MB) instead of the ~100MB delta bundle.
+      - name: Build plain extension bundle (no static deltas)
+        run: |
+          set -euo pipefail
+          VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
+          ID=com.obsproject.Studio.Plugin.atkAudio
+          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak ${ID} stable --runtime
+          ls -lh atkAudioForOBS-${VER}.flatpak
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
+          path: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
+          if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
@@ -49,9 +69,22 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
       - name: Download workflow run artifacts
         uses: actions/download-artifact@v5
-      - name: Rename release file
+        with:
+          path: release
+      - name: Verify plain bundle (no static-delta metadata)
         run: |
-          mv atkAudio atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
+          set -euo pipefail
+          VER="${{ steps.version.outputs.version }}"
+          F="release/atkAudioForOBS-${VER}.flatpak"
+          ls -lh "$F"
+          echo "  size_bytes=$(stat -c%s "$F")"
+          # Header must NOT contain static-delta/update metadata (the old bloat source).
+          if strings "$F" | grep -q 'deltas/av'; then
+            echo "ERROR: bundle still contains static deltas"; exit 1
+          fi
+          if strings "$F" | grep -q 'flathub.flatpakrepo'; then
+            echo "ERROR: bundle still references an update runtime-repo"; exit 1
+          fi
       - name: Build changelog from git history
         id: changelog
         run: |
@@ -81,4 +114,4 @@ jobs:
           make_latest: true
           preserve_order: true
           files: |
-            atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
+            release/atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
