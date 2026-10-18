@@ -38,26 +38,20 @@ jobs:
       # static-delta ostree bundle (`deltas/av/…`) rebuilding the full OBS SDK/platform (~218MB x2), which is
       # what bloated the artifact to ~117MB. Plain build-bundle emits just the .files layer (~17MB).
       #
-      # NOTE ON THE REF SPEC: build-extension:true emits an `ext/…` ref (app/<id> does NOT exist in the repo).
-      # flatpak's `build-bundle` tries to resolve NAME verbatim first, and only if that fails does it prefix
-      # guessing (`app/<name>` / `runtime/<name>`) — so passing a bare app-id (the old `${ID} stable`) always
-      # failed with "Refspec 'app/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable' not found". We therefore
-      # discover the exact ext ref from the just-built repo and pass it verbatim so it matches on the first,
-      # no-prefix attempt. `ostree --repo=repo refs` is used because flatpak itself can't list repo refs.
+      # NOTE ON THE REF SPEC: build-extension:true emits an `ext/…` ref — app/<id> does NOT exist in the repo.
+      # flatpak's `build-bundle` resolves NAME verbatim first, and only on failure does it prefix-guess
+      # (`app/<name>` / `runtime/<name>`). Passing a bare app-id (the old `${ID} stable`) fell through to that
+      # guessing and failed with "Refspec 'app/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable' not found".
+      # OBS plugins ship as ext/<runtime>/<app-id>, runtime=com.obsproject.Studio (per manifest), so the ref is
+      # deterministic; pass it verbatim so build-bundle matches on the first, no-prefix attempt. Do NOT use
+      # `ostree --repo=repo refs` to discover it — ostree is not installed in the flatpak-builder image and its
+      # command substitution fails under `set -euo pipefail`, aborting the step silently before flatpak runs.
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          # Discover the extension ref actually produced by flatpak-builder (e.g.
-          # ext/com.obsproject.Studio/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable). Determining it from
-          # the repo avoids guessing the runtime segment and guarantees a verbatim match under build-bundle.
-          EXT_REF=$(ostree --repo=repo refs 2>/dev/null | grep '^ext/' | head -n1)
-          if [ -z "${EXT_REF}" ]; then
-            echo "ERROR: no ext/… ref found in repo; available refs:" >&2
-            ostree --repo=repo refs || true
-            exit 1
-          fi
-          echo "Using extension ref: ${EXT_REF}"
+          EXT_REF=ext/com.obsproject.Studio/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
+          echo "Building plain extension bundle for ref: ${EXT_REF}"
           flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak "${EXT_REF}"
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
