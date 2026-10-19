@@ -3,9 +3,12 @@ branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
 sdk: org.freedesktop.Sdk//25.08
-# build-extension produces a runtime extension, not an app; it has no runnable command,
-# so `command:` must be omitted (setting it caused flatpak-builder to fail at "Command 'obs' not found").
-build-extension: true
+# build-extension: only produces a PURE runtime extension (no [Runtime] section in its own metadata),
+# unlike plain `build-extension: true`, which emits an extension whose .metadata ALSO carries a [Runtime]
+# block. That [Runtime] block makes flatpak build-bundle embed the SDK (~110MB) when bundling the ext/ ref,
+# blowing past the 25MB size gate. A pure extension has no runtime metadata to pull in, so it bundles slim.
+# It also has no runnable command (an extension installs INTO an existing OBS app), so `command:` stays omitted.
+build-extension: only
 separate-locales: false
 # The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback).
 # Qt6 is provided by the org.freedesktop.Sdk//25.08 at /usr/lib/qt6, which a build-extension links at BUILD
