@@ -3,13 +3,16 @@ branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
 sdk: org.freedesktop.Sdk//25.08
-# build-extension: only produces a PURE runtime extension (no [Runtime] section in its own metadata),
-# unlike plain `build-extension: true`, which emits an extension whose .metadata ALSO carries a [Runtime]
-# block. That [Runtime] block makes flatpak build-bundle embed the SDK (~110MB) when bundling the ext/ ref,
-# blowing past the 25MB size gate. A pure extension has no runtime metadata to pull in, so it bundles slim.
-# It also has no runnable command (an extension installs INTO an existing OBS app), so `command:` stays omitted.
-build-extension: only
+# build-extension: true builds the module against the org.freedesktop.Sdk (obs deps resolved at build time
+# via pkg-config + /usr/include fallback, Qt6 from the SDK) WITHOUT requiring the OBS runtime to be installed
+# in the build container — which `build-extension: only` WOULD demand ("com.obsproject.Studio/... not installed").
+# A plain extension also emits a `[Runtime]` block in its own .metadata (name/sdk). Bundling that ext/ ref with
+# flatpak build-bundle therefore pulls the ~110MB SDK into the artifact and fails the 25MB size gate. The fix:
+# `runtime-extensions: []` makes the extension declare NO runtime of its own, so its .metadata has no [Runtime]
+# block to embed, yet the module still builds against the SDK. OBS remains the host runtime at install time.
+build-extension: true
 separate-locales: false
+runtime-extensions: []
 # The OBS runtime provides libobs/obs-frontend-api (atkAudio finds them via pkg-config + /usr/include fallback).
 # Qt6 is provided by the org.freedesktop.Sdk//25.08 at /usr/lib/qt6, which a build-extension links at BUILD
 # time AND has available at RUNTIME (Sdk shared). => Build-time Qt == runtime Qt => no ABI drift; JUCE just
