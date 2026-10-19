@@ -3,13 +3,14 @@ branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
 sdk: org.freedesktop.Sdk//25.08
-# build-extension: true builds the module against the org.freedesktop.Sdk (obs deps resolved at build time
-# via pkg-config + /usr/include fallback, Qt6 from the SDK) WITHOUT requiring the OBS runtime to be installed
-# in the build container — which `build-extension: only` WOULD demand ("com.obsproject.Studio/... not installed").
-# A plain extension also emits a `[Runtime]` block in its own .metadata (name/sdk). Bundling that ext/ ref with
-# flatpak build-bundle therefore pulls the ~110MB SDK into the artifact and fails the 25MB size gate. The fix:
-# `runtime-extensions: []` makes the extension declare NO runtime of its own, so its .metadata has no [Runtime]
-# block to embed, yet the module still builds against the SDK. OBS remains the host runtime at install time.
+# build-extension: true builds the module against org.freedesktop.Sdk//25.08 (obs deps via pkg-config +
+# /usr/include fallback, Qt6 from the SDK) WITHOUT requiring the OBS runtime installed in the build container —
+# `build-extension: only` would demand the OBS runtime be present ("com.obsproject.Studio/... not installed").
+# Build-time Qt == OBS's in-process Qt => no ABI drift; JUCE simply find_package()s the same SDK Qt.
+# NOTE: a build-extension always emits its own .metadata with a [Runtime] name/sdk block, but that block does NOT
+# pull the runtime into the bundle (host-verified: a fresh `ext/<id>/x86_64/stable` ref bundles content-only).
+# The slim ~17MB artifact comes from bundling a fresh archive-z2 repo that contains ONLY the extension commit —
+# see .github/workflows/build-flatpak.yaml, which re-commits the ext tree under an `ext/` ref before build-bundle.
 build-extension: true
 separate-locales: false
 runtime-extensions: []
@@ -56,6 +57,9 @@ modules:
         # Release tag name is 'atkaudio-pluginforobs' (buildspec.json), not the app-id;
         # CMake builds atkaudio-pluginforobs.so, so install that artifact.
         install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins atkaudio-pluginforobs.so
+        # Strip symbols: the Release build has no .debug_* sections, so this removes only the symbol table
+        # (20.8 MB -> ~17.2 MB), yielding a slim distributable plugin with comfortable margin under the 25MB gate.
+        strip --strip-all ${FLATPAK_DEST}/lib/obs-plugins/atkaudio-pluginforobs.so
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
