@@ -34,25 +34,42 @@ jobs:
           repo-dir: repo
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
-      # Emit a plain extension bundle. CRITICAL: do NOT add `--runtime` — that flag makes flatpak generate a
-      # static-delta ostree bundle (`deltas/av/…`) rebuilding the full OBS SDK/platform (~218MB x2), which is
-      # what bloated the artifact to ~117MB. Plain build-bundle emits just the .files layer (~17MB).
+      # Emit a plain extension bundle (no static-delta bloat). CRITICAL: do NOT add `--runtime` — that flag
+      # makes flatpak generate a static-delta ostree bundle (`deltas/av/…`) rebuilding the full OBS
+      # SDK/platform (~218MB x2), which is what bloated the artifact to ~117MB. Plain build-bundle emits just
+      # the .files layer (~17MB).
       #
-      # NOTE ON THE REF SPEC: build-extension:true emits an `ext/…` ref — app/<id> does NOT exist in the repo.
-      # flatpak's `build-bundle` resolves NAME verbatim first, and only on failure does it prefix-guess
-      # (`app/<name>` / `runtime/<name>`). Passing a bare app-id (the old `${ID} stable`) fell through to that
-      # guessing and failed with "Refspec 'app/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable' not found".
-      # OBS plugins ship as ext/<runtime>/<app-id>, runtime=com.obsproject.Studio (per manifest), so the ref is
-      # deterministic; pass it verbatim so build-bundle matches on the first, no-prefix attempt. Do NOT use
-      # `ostree --repo=repo refs` to discover it — ostree is not installed in the flatpak-builder image and its
-      # command substitution fails under `set -euo pipefail`, aborting the step silently before flatpak runs.
+      # REF SPEC problem: build-extension:true emits an `ext/…` ref, NOT `app/<id>`. On flatpak 1.18.1 (this
+      # image) `flatpak build-bundle` does NOT accept the full ext ref as NAME — `_repo_resolve_rev(repo,
+      # "ext/...")` returns FALSE (the plain ext ref is not resolvable this way and there's no collection-id),
+      # so it falls through to flatpak_is_valid_name("ext/...") which rejects "/" ("Name can't contain /").
+      # The old bare-app-id approach also failed: build-bundle prefix-guesses `app/<name>` when NAME doesn't
+      # resolve, but that app ref does not exist in the repo -> "Refspec 'app/…' not found".
+      #
+      # FIX (verified locally in flatpak-github-actions:freedesktop-26.08): the manifest has no collection-id,
+      # so flatpak-builder exports a plain ostree ref file at refs/heads/ext/<runtime>/<id>/x86_64/stable.
+      # `ostree add-ref`/`--from` are unavailable in this image, but we can copy that checksum file to an app
+      # ref path (same commit). Then bundle with the BARE app-id so build-bundle constructs and resolves
+      # app/<id>/x86_64/stable itself — no "/" in NAME. ostree IS installed in the image (rev-parse works);
+      # `set -euo pipefail` is safe because each command is checked explicitly.
+      - name: Create app ref from ext ref (copy checksum file)
+        run: |
+          set -euo pipefail
+          EXT_REF=ext/com.obsproject.Studio/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
+          APP_REF=app/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
+          COMMIT=$(ostree --repo=repo rev-parse "$EXT_REF")
+          echo "ext ref $EXT_REF -> commit $COMMIT"
+          mkdir -p repo/refs/heads/app/com.obsproject.Studio.Plugin.atkAudio/x86_64
+          # Copy the checksum file (NOT into a pre-made `stable` dir). Make the parent dir, then cp into it so
+          # the leaf filename is `stable`, matching the ref path structure ostree expects.
+          printf '%s\n' "$COMMIT" > repo/refs/heads/$APP_REF
+          echo "app ref now resolves: $(ostree --repo=repo rev-parse "$APP_REF")"
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          EXT_REF=ext/com.obsproject.Studio/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
-          echo "Building plain extension bundle for ref: ${EXT_REF}"
-          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak "${EXT_REF}"
+          echo "Building plain extension bundle for app: com.obsproject.Studio.Plugin.atkAudio stable"
+          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak com.obsproject.Studio.Plugin.atkAudio stable
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
