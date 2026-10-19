@@ -56,7 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
-          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "/${ID}/x86_64/.+$" | head -1)
+          ID=com.obsproject.Studio.Plugin.atkAudio
+          # Anchor to the EXTENSION ref (ext/<id>/...) only. The export repo also contains the OBS platform
+          # under com.obsproject.Studio.* refs; a loose match (/<id>/x86_64/.+$) can pick a platform commit whose
+          # tree embeds the whole runtime, so bundle that bloat. Only the plugin's extension ref is clean.
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "^ext/${ID}/x86_64/.+$" | head -1)
           if [ -z "$REF" ]; then
             echo "ERROR: no ext ref found for ${ID} in repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
           fi
