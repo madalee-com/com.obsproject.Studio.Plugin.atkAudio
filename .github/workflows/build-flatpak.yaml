@@ -46,30 +46,39 @@ jobs:
       # The old bare-app-id approach also failed: build-bundle prefix-guesses `app/<name>` when NAME doesn't
       # resolve, but that app ref does not exist in the repo -> "Refspec 'app/…' not found".
       #
-      # FIX (verified locally in flatpak-github-actions:freedesktop-26.08): the manifest has no collection-id,
-      # so flatpak-builder exports a plain ostree ref file at refs/heads/ext/<runtime>/<id>/x86_64/stable.
-      # `ostree add-ref`/`--from` are unavailable in this image, but we can copy that checksum file to an app
-      # ref path (same commit). Then bundle with the BARE app-id so build-bundle constructs and resolves
-      # app/<id>/x86_64/stable itself — no "/" in NAME. ostree IS installed in the image (rev-parse works);
-      # `set -euo pipefail` is safe because each command is checked explicitly.
+      # ROOT CAUSE of the previous CI failure (step 6 "Refspec not found"): flatpak-builder-action defaults
+      # `branch` to `master`, so the exported ref is ext/<runtime>/<id>/x86_64/master, NOT .../stable. The old
+      # step hardcoded x86_64/stable and hardcoded the exact ext ref, so `ostree rev-parse` could not find it.
+      # FIX (verified in flatpak-github-actions:freedesktop-26.08): discover the exported ref DYNAMICALLY via
+      # `ostree refs` (plain archive-mode repo, refs/heads/ext/<runtime>/<id>/x86_64/<branch>). Copy its
+      # checksum file to an app/<id>/x86_64/<branch> path (same commit). Then bundle with the BARE app-id so
+      # build-bundle constructs and resolves app/<id>/x86_64/<branch> itself — no "/" in NAME. `ostree add-ref`
+      # / `--from` are unavailable in this image, but writing the checksum file works (plain archive repo).
       - name: Create app ref from ext ref (copy checksum file)
         run: |
           set -euo pipefail
-          EXT_REF=ext/com.obsproject.Studio/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
-          APP_REF=app/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
-          COMMIT=$(ostree --repo=repo rev-parse "$EXT_REF")
-          echo "ext ref $EXT_REF -> commit $COMMIT"
-          mkdir -p repo/refs/heads/app/com.obsproject.Studio.Plugin.atkAudio/x86_64
-          # Copy the checksum file (NOT into a pre-made `stable` dir). Make the parent dir, then cp into it so
-          # the leaf filename is `stable`, matching the ref path structure ostree expects.
+          ID=com.obsproject.Studio.Plugin.atkAudio
+          # Discover the exported ext/<runtime>/<id>/x86_64/<branch> ref for THIS id, any branch.
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "/${ID}/x86_64/.+$" | head -1)
+          if [ -z "$REF" ]; then
+            echo "ERROR: no ext ref found for ${ID} in repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
+          fi
+          echo "exported ref = $REF"
+          BRANCH="${REF##*/}"
+          APP_REF="app/${ID}/x86_64/${BRANCH}"
+          COMMIT=$(ostree --repo=repo rev-parse "$REF")
+          mkdir -p repo/refs/heads/app/${ID}/x86_64
+          # Parent dir (…/x86_64) exists; write the checksum so the leaf filename is <branch>.
           printf '%s\n' "$COMMIT" > repo/refs/heads/$APP_REF
-          echo "app ref now resolves: $(ostree --repo=repo rev-parse "$APP_REF")"
+          echo "app ref $APP_REF -> $(ostree --repo=repo rev-parse "$APP_REF")"
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
+          ID=com.obsproject.Studio.Plugin.atkAudio
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for app: com.obsproject.Studio.Plugin.atkAudio stable"
-          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak com.obsproject.Studio.Plugin.atkAudio stable
+          BRANCH=$(ostree --repo=repo refs 2>/dev/null | grep -E "/${ID}/x86_64/.+$" | head -1 | sed 's#.*/##')
+          echo "Building plain extension bundle for ${ID} branch=${BRANCH} tag=${VER}"
+          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak "${ID}" "${BRANCH}"
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
