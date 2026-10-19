@@ -56,35 +56,43 @@ jobs:
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
-          # flatpak-builder exports the build-extension output to build/exports/extension/<AppId>/ -- a
-          # flatpak-exported tree that contains ONLY the plugin's installed files (post-install .so under
-          # lib/obs-plugins, plus its own metadata). The OBS platform lives in repo/ (com.obsproject.Studio/*)
-          # but is NOT inside this export dir, so bundling from it can never embed the ~90MB OBS static-delta
-          # base. Dump the full export-ref list purely for diagnostics.
-          echo "flatpak-builder export refs:"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  /'
-          EXT_DIR="build/exports/extension/${ID}"
-          if [ ! -d "$EXT_DIR" ]; then
-            echo "ERROR: missing extension export dir $EXT_DIR"; ls -R build/exports 2>/dev/null | head -40; exit 1
+          # CI's export repo (repo/) contains this plugin's runtime commit:
+          #   runtime/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
+          # Note the ref STARTS WITH "runtime/" (not "ext/"), so any pattern anchored at the bare app-id
+          # fails. Anchor on the plugin-unique ".Plugin.atkAudio" substring AND require the trailing
+          # "/x86_64/stable"; this cannot match the OBS platform ref "com.obsproject.Studio/x86_64/stable".
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
+          if [ -z "$REF" ]; then
+            echo "ERROR: no ${ID} extension ref in export repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
+          fi
+          COMMIT=$(ostree --repo=repo rev-parse "$REF")
+          echo "selected plugin ref $REF = $COMMIT"
+          # Sanity: the commit must be a slim extension tree. The full OBS platform app has thousands of tree
+          # entries; this plugin has far fewer. If we accidentally picked a huge tree, bail instead of
+          # shipping a bloated bundle.
+          N=$(ostree --repo=repo ls -R "$COMMIT" 2>/dev/null | wc -l)
+          echo "plugin commit tree entries = $N"
+          if [ "$N" -gt 2000 ]; then
+            echo "ERROR: selected commit is unexpectedly large (${N} entries) -- not an extension"; exit 1
           fi
           rm -rf extrepo workdir
-          # Fresh archive-z2 repo containing ONLY the extension objects. No runtime installed is needed for a
-          # plain archive-z2 ostree commit (flatpak build-init/-export would require the OBS runtime, which we
-          # deliberately avoid here).
+          # Checkout the extension tree into a FRESH archive-z2 repo that contains ONLY the extension objects
+          # (no platform objects present). No runtime installed is needed for a plain archive-z2 ostree commit.
           ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
-          # Commit the flatpak-exported tree verbatim under an EXTENSION ref (ext/<id>/...). Bundling an `ext/`
-          # ref makes flatpak treat this as a plugin extension with NO required runtime in the bundle, so the
-          # OBS platform cannot be emitted as a static-delta base. (Bundling under a `runtime/` ref is what
-          # pulled the whole runtime into the original ~90MB bloat.)
+          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
+          # Re-commit under an EXTENSION ref (ext/<id>/...). Bundling an `ext/` ref makes flatpak treat this
+          # as a plugin extension with NO required runtime in the bundle, so the OBS platform cannot be
+          # emitted as a static-delta base. (Bundling under a `runtime/` ref is what pulled the whole runtime
+          # into the original ~90MB bloat.)
           FRESH=$(ostree --repo=extrepo commit --branch="ext/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension" "$EXT_DIR" 2>/dev/null | tail -1)
+                    --subject="atkAudio plugin extension" workdir 2>/dev/null | tail -1)
           echo "fresh ext-only commit = $FRESH"
-          echo "extension export dir file count = $(find "$EXT_DIR" -type f | wc -l)"
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for ${ID} (ext-only dir) tag=${VER}"
+          echo "Building plain extension bundle for ${ID} (ext-only commit) tag=${VER}"
           flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
             "ext/${ID}/x86_64/stable" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
