@@ -56,35 +56,37 @@ jobs:
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
-          ID=com.obsproject.Studio.Plugin.atkAudio
-          # Anchor to the EXTENSION ref (ext/<id>/...) only. The export repo also contains the OBS platform
-          # under com.obsproject.Studio.* refs; a loose match (/<id>/x86_64/.+$) can pick a platform commit whose
-          # tree embeds the whole runtime, so bundle that bloat. Only the plugin's extension ref is clean.
-          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "^ext/${ID}/x86_64/.+$" | head -1)
-          if [ -z "$REF" ]; then
-            echo "ERROR: no ext ref found for ${ID} in repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
+          # flatpak-builder exports the build-extension output to build/exports/extension/<AppId>/ -- a
+          # flatpak-exported tree that contains ONLY the plugin's installed files (post-install .so under
+          # lib/obs-plugins, plus its own metadata). The OBS platform lives in repo/ (com.obsproject.Studio/*)
+          # but is NOT inside this export dir, so bundling from it can never embed the ~90MB OBS static-delta
+          # base. Dump the full export-ref list purely for diagnostics.
+          echo "flatpak-builder export refs:"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  /'
+          EXT_DIR="build/exports/extension/${ID}"
+          if [ ! -d "$EXT_DIR" ]; then
+            echo "ERROR: missing extension export dir $EXT_DIR"; ls -R build/exports 2>/dev/null | head -40; exit 1
           fi
-          COMMIT=$(ostree --repo=repo rev-parse "$REF")
-          echo "exported $REF = $COMMIT"
           rm -rf extrepo workdir
-          # Fresh archive-z2 repo containing ONLY the extension objects (no platform present).
+          # Fresh archive-z2 repo containing ONLY the extension objects. No runtime installed is needed for a
+          # plain archive-z2 ostree commit (flatpak build-init/-export would require the OBS runtime, which we
+          # deliberately avoid here).
           ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
-          mkdir -p extrepo/refs/heads/runtime/${ID}/x86_64
-          # Checkout the ext tree (platform files excluded) and re-commit under the SAME runtime ref id so OBS still
-          # treats it as a plugin extension. bundle-bundle over this repo cannot embed the platform because its
-          # objects are not present here.
-          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
-          FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension" workdir 2>/dev/null | tail -1)
+          # Commit the flatpak-exported tree verbatim under an EXTENSION ref (ext/<id>/...). Bundling an `ext/`
+          # ref makes flatpak treat this as a plugin extension with NO required runtime in the bundle, so the
+          # OBS platform cannot be emitted as a static-delta base. (Bundling under a `runtime/` ref is what
+          # pulled the whole runtime into the original ~90MB bloat.)
+          FRESH=$(ostree --repo=extrepo commit --branch="ext/${ID}/x86_64/stable" \
+                    --subject="atkAudio plugin extension" "$EXT_DIR" 2>/dev/null | tail -1)
           echo "fresh ext-only commit = $FRESH"
+          echo "extension export dir file count = $(find "$EXT_DIR" -type f | wc -l)"
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for ${ID} (ext-only repo) tag=${VER}"
+          echo "Building plain extension bundle for ${ID} (ext-only dir) tag=${VER}"
           flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
-            "runtime/${ID}/x86_64/stable" stable
+            "ext/${ID}/x86_64/stable" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
