@@ -81,21 +81,27 @@ jobs:
           # Keep the .metadata intact (OBS reads `runtime = com.obsproject.Studio/x86_64/stable` to bind the
           # extension to the running OBS host). This has zero size impact; the content-only ext/ ref still
           # prevents the OBS platform from being emitted as a static-delta base. Do nothing here.
-          # Re-commit under an EXTENSION ref (ext/<id>/...). Bundling an `ext/` ref makes flatpak treat this
-          # as a plugin extension with NO required runtime in the bundle, so the OBS platform cannot be
-          # emitted as a static-delta base. (Bundling under a `runtime/` ref is what pulled the whole runtime
-          # into the original ~90MB bloat.)
-          FRESH=$(ostree --repo=extrepo commit --branch="ext/${ID}/x86_64/stable" \
+          # Re-commit under a RUNTIME ref (runtime/<id>/...). flatpak REJECTS `ext/` refs on install
+          # ("ext/... is not application or runtime") — that rejection was the original INSTALL-TIME failure.
+          # A runtime/<id> ref installs cleanly with `flatpak install <file>.flatpak` and lands in the correct
+          # OBS extension path (OBS recognizes the com.obsproject.Studio.Plugin.* prefix for its extension point).
+          # This still bundles content-only: no --runtime-repo is passed, so the OBS platform objects are NOT
+          # pulled into this archive-z2 bundle => stays slim (~10-17MB) while remaining installable.
+          FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
                     --subject="atkAudio plugin extension" workdir 2>/dev/null | tail -1)
           echo "fresh ext-only commit = $FRESH"
+          # Generate a flatpak summary so Pages-hosted repo is consumable by flatpak over HTTP:
+          # the client fetches summary.idx (not the raw objects). No signing key needed for install.
+          ostree summary --update --repo=extrepo 2>&1 | tail -2
+          echo "flatpak summary generated for extrepo/ (summary.idx)"
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for ${ID} (ext-only commit) tag=${VER}"
+          echo "Building plain extension bundle for ${ID} (runtime ref, content-only) tag=${VER}"
           flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
-            "ext/${ID}/x86_64/stable" stable
+            "runtime/${ID}/x86_64/stable" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
@@ -103,6 +109,19 @@ jobs:
           name: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           path: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           if-no-files-found: error
+      - name: Publish ostree repo to GitHub Pages (for .flatpakref install)
+        env:
+          # A flatpak .flatpakref's [Connection] Endpoint must be a real ostree repo served over HTTP.
+          # extrepo/ (archive-z2 + generated summary.idx) is the endpoint; flatpak fetches summary.idx,
+          # objects/sha256/.. and refs/.. as static files from Pages. The .flatpak bundle alone CANNOT be
+          # installed (flatpak rejects ext refs: "ext/... is not application or runtime"), so this Pages
+          # repo is the actual install endpoint users hit via `flatpak install atkOBS2.flatpakref`.
+          PAGES_REPO: com.obsproject.Studio.Plugin.atkAudio
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./extrepo
 
   release:
     runs-on: ubuntu-latest
@@ -143,6 +162,21 @@ jobs:
             echo
             git log --pretty=format:'- %s (%h)' -n 60 $RANGE
           } > CHANGELOG_BODY.md
+      - name: Emit .flatpakref (install endpoint)
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          ID=com.obsproject.Studio.Plugin.atkAudio
+          # The flatpak bundle CANNOT be installed directly (flatpak rejects ext refs).
+          # This .flatpakref points at the Pages-hosted ostree repo published in the flatpak job.
+          cat > atkOBS2.flatpakref <<EOF
+          [Flatpak Ref]
+          Ref=${ID}
+          Arch=x86_64
+          Branch=stable
+          [Connection]
+          Endpoint=https://madalee-com.github.io/com.obsproject.Studio.Plugin.atkAudio/
+          EOF
+          echo "--- atkOBS2.flatpakref ---"; cat atkOBS2.flatpakref
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -154,6 +188,7 @@ jobs:
           make_latest: true
           preserve_order: true
           files: |
+            atkOBS2.flatpakref
             release/atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
       - name: Verify plain bundle (no static-delta metadata)
         run: |
