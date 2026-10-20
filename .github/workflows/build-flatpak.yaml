@@ -42,9 +42,9 @@ jobs:
       # that flatpak-builder pulled into the export repo when auto-bundling (build-bundle: true, with --runtime-repo).
       # We avoid that by NOT auto-bundling and by bundling only a fresh archive-z2 repo that holds the extension
       # commit under an `ext/` ref — no platform objects are reachable, so no static-delta base can be emitted =>
-      # bundle is ~17MB with no deltas/av-style header paths. Stripping [Runtime] from the ext .metadata here is
-      # cosmetic (no size impact) but keeps the bundle a clean runtime-less plugin extension, which is what OBS
-      # loads into its running host at install time.
+      # bundle is ~17MB with no deltas/av-style header paths. We KEEP the [Runtime]/[ExtensionOf] block in the
+      # extension .metadata: OBS reads `runtime = com.obsproject.Studio/x86_64/stable` from it to bind the plugin
+      # to the running OBS host, so stripping it broke install/load (it was NOT cosmetic).
       - name: Build extension-only repo (strip embedded OBS platform)
         run: |
           set -euo pipefail
@@ -73,10 +73,14 @@ jobs:
           # (no platform objects present). No runtime installed is needed for a plain archive-z2 ostree commit.
           ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
           ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
-          # Strip the vestigial [Runtime] block from the extension .metadata so the bundled extension declares no
-          # runtime (OBS loads it as a plugin). Host-verified: cosmetic, no size impact.
-          awk '/^\[Runtime\]$/{inrt=1; next} inrt && /^$/{inrt=0; next} !inrt{print}' \
-            workdir/.metadata > workdir/.metadata.tmp 2>/dev/null && mv workdir/.metadata.tmp workdir/.metadata 2>/dev/null || true
+          # Do NOT strip the [Runtime] block — a build-extension .metadata is:
+          #   [Runtime]\nname=…\nsdk=…\n[ExtensionOf]\nruntime = com.obsproject.Studio/x86_64/stable\n…
+          # The awk below deletes EVERYTHING between `[Runtime]` and the blank line, which removes BOTH the
+          # name/sdk AND the REQUIRED runtime = com.obsproject.Studio line from [ExtensionOf]. That leaves an
+          # extension with no declared OBS runtime → OBS refuses to load it ("won't install/open in OBS").
+          # Keep the .metadata intact (OBS reads `runtime = com.obsproject.Studio/x86_64/stable` to bind the
+          # extension to the running OBS host). This has zero size impact; the content-only ext/ ref still
+          # prevents the OBS platform from being emitted as a static-delta base. Do nothing here.
           # Re-commit under an EXTENSION ref (ext/<id>/...). Bundling an `ext/` ref makes flatpak treat this
           # as a plugin extension with NO required runtime in the bundle, so the OBS platform cannot be
           # emitted as a static-delta base. (Bundling under a `runtime/` ref is what pulled the whole runtime
