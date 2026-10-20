@@ -60,14 +60,15 @@ modules:
         # Strip symbols: the Release build has no .debug_* sections, so this removes only the symbol table
         # (20.8 MB -> ~17.2 MB), yielding a slim distributable plugin with comfortable margin under the 25MB gate.
         strip --strip-all ${FLATPAK_DEST}/lib/obs-plugins/atkaudio-pluginforobs.so
-        # The Linux install rule also installs a SECOND, unstripped copy of the plugin into
-        # obs-plugins/${_portable_arch}/ (obs-plugins/64bit/) plus any debug symbols. flatpak build-bundle
-        # re-encodes that extra ~20 MB content as large static deltas -> the 64 MB bloat. Prune the
-        # extension tree to ONLY this single stripped plugin so it stays slim (~17 MB < 25MB gate).
-        find "${FLATPAK_DEST}" -mindepth 1 \
-          ! -path "${FLATPAK_DEST}/lib/obs-plugins" \
-          ! -path "${FLATPAK_DEST}/lib/obs-plugins/atkaudio-pluginforobs.so" \
-          -delete
+        # The Linux install rule also installs SECOND, unstripped copies of the plugin and scanner into
+        # obs-plugins/${_portable_arch}/ (obs-plugins/64bit/) plus install.sh and a share/ tree. flatpak
+        # build-bundle re-encodes that extra ~20 MB as large static deltas -> the 64 MB bloat. Remove
+        # exactly those stray runtime-style paths, keeping ONLY this single stripped plugin under
+        # lib/obs-plugins/ so the bundle stays slim (~17 MB < 25MB gate). Explicit path removal avoids
+        # find -delete's refusal to delete a still-non-empty parent directory (which failed the build).
+        rm -rf "${FLATPAK_DEST}/obs-plugins" \
+               "${FLATPAK_DEST}/install.sh" \
+               "${FLATPAK_DEST}/share"
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
