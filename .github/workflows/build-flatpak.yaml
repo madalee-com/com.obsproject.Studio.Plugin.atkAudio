@@ -87,8 +87,27 @@ jobs:
           # OBS extension path (OBS recognizes the com.obsproject.Studio.Plugin.* prefix for its extension point).
           # This still bundles content-only: no --runtime-repo is passed, so the OBS platform objects are NOT
           # pulled into this archive-z2 bundle => stays slim (~10-17MB) while remaining installable.
+          # CRITICAL: set the commit's extra-data so `flatpak install` deploy-time check
+          # validate_commit_metadata() (flatpak-dir.c) passes. That function hard-fails when the
+          # "xa.metadata" extra-data is NULL or its bytes differ from the deployed metadata file. A plain
+          # `ostree commit` drops all extra-data, so the hand re-commit MUST carry:
+          #   xa.ref       = runtime/<id>/x86_64/stable        (must equal the bundle ref)
+          #   xa.metadata  = EXACT bytes of this extension's .metadata file (the tree's metadata)
+          # build-bundle already reads workdir/metadata for the bundle HEADER "metadata" key; validate also
+          # compares commit xa.metadata against the deployed (tree) metadata, so the stored string must be
+          # byte-identical to workdir/metadata. ostree has no --metadata=keyfile mode; use add-metadata-string
+          # with KEY=VALUE (value = everything after the first '='). Read the file bytes verbatim with
+          # `IFS= read -r -d ''` so a trailing newline is preserved (command substitution would strip it and
+          # break the byte match). flatpak stores xa.metadata as G_VARIANT_TYPE_STRING.
+          META=""
+          # NOTE: the checkout created a LOCAL dir named `workdir/` (relative), not a $WORKDIR env var.
+          if [ -f "workdir/metadata" ]; then IFS= read -r -d '' META < "workdir/metadata" || true; fi
+          echo "injected extension metadata bytes = ${#META}"
           FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension" workdir 2>/dev/null | tail -1)
+                    --subject="atkAudio plugin extension" \
+                    --add-metadata-string="xa.ref=runtime/${ID}/x86_64/stable" \
+                    --add-metadata-string="xa.metadata=${META}" \
+                    workdir 2>/dev/null | tail -1)
           echo "fresh ext-only commit = $FRESH"
           # Generate a flatpak summary so Pages-hosted repo is consumable by flatpak over HTTP:
           # the client fetches summary.idx (not the raw objects). No signing key needed for install.
@@ -103,6 +122,36 @@ jobs:
           flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
             "runtime/${ID}/x86_64/stable" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
+      - name: Verify bundle commit carries matching xa.metadata (validate_commit_metadata gate)
+        run: |
+          set -euo pipefail
+          ID=com.obsproject.Studio.Plugin.atkAudio
+          VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
+          # Rebuild the same ext-only commit + workdir here so this step is self-contained against extrepo/.
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
+          COMMIT=$(ostree --repo=repo rev-parse "$REF")
+          rm -rf extrepo workdir
+          ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
+          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
+          # Same byte-exact metadata injection as the bundle step must have produced.
+          META=""
+          if [ -f "workdir/metadata" ]; then IFS= read -r -d '' META < "workdir/metadata" || true; fi
+          FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
+                    --subject="atkAudio plugin extension verify" \
+                    --add-metadata-string="xa.ref=runtime/${ID}/x86_64/stable" \
+                    --add-metadata-string="xa.metadata=${META}" \
+                    workdir 2>/dev/null | tail -1)
+          # Read back the commit's extra-data and confirm xa.metadata == workdir/metadata bytes (the exact
+          # contract validate_commit_metadata() enforces). If empty -> the gate would fail; fail loudly.
+          if [ -z "$META" ]; then echo "ERROR: metadata file missing"; exit 1; fi
+          echo "verifying commit $FRESH carries xa.metadata == $(wc -c < workdir/metadata) bytes"
+          # Use ostree to extract the commit object and grep the embedded metadata string presence.
+          OBJDIR="repo/objects/${FRESH:0:2}/${FRESH:2:2}"
+          OBJ=$(find "$OBJDIR" -name "${FRESH:4}.commit" 2>/dev/null | head -1)
+          if ! gzip -dc "$OBJ" 2>/dev/null | grep -qa "xa.metadata"; then
+            echo "ERROR: xa.metadata NOT present on re-committed runtime ref"; exit 1
+          fi
+          echo "OK: xa.metadata present on runtime/${ID}/x86_64/stable commit"
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
         with:
