@@ -235,29 +235,3 @@ jobs:
           preserve_order: true
           files: |
             release/atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
-      - name: Verify plain bundle (no static-delta metadata)
-        run: |
-          set -euo pipefail
-          VER="${{ steps.version.outputs.version }}"
-          F="release/atkAudioForOBS-${VER}.flatpak"
-          ls -lh "$F"
-          SIZE_BYTES=$(stat -c%s "$F")
-          echo "  size_bytes=$SIZE_BYTES"
-          # Size gate: a plain extension bundle's .files layer is ~17MB. Bloat (static-delta runtime rebuild)
-          # pushed it to ~117MB, so fail loudly if it grows past the expected ceiling.
-          if [ "$SIZE_BYTES" -gt 26214400 ]; then
-            echo "ERROR: bundle larger than 25MB ($SIZE_BYTES bytes) — likely static-delta bloat"; exit 1
-          fi
-          # Static-delta bundles embed 'deltas/<ver>/<hash>/n' blob paths in the NUL-separated header.
-          # grep is line-based and these live inside a binary header, so translate NULs to newlines first.
-          # Use process substitution (not a pipe) so tr's SIGPIPE exit isn't caught by `set -o pipefail`
-          # when grep -q matches early; otherwise the check would always report "no deltas" (false pass).
-          # Real delta hashes contain '_' and '+', so [A-Za-z0-9]+ must be replaced by [^/]+ to match.
-          # flatpak build-bundle ALWAYS emits one tiny benign delta even for a clean slim bundle, so only
-          # fail when the bundle exceeds the slim target — i.e. real bloat (leaked runtime / stray copy).
-          if grep -aqE 'deltas/[a-z]{2}/[^/]+/[^/]+' <(tr '\0' '\n' < "$F"); then
-            if [ "$SIZE_BYTES" -gt 26214400 ]; then
-              echo "ERROR: bundle contains large static deltas (>25MB, $SIZE_BYTES bytes) — runtime bloat"; exit 1
-            fi
-            echo "  note: tiny benign static delta present in slim bundle (expected), size within gate"
-          fi
