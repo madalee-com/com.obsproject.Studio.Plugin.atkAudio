@@ -1,8 +1,40 @@
-# ATKAudio Plugin for OBS packaged as a Flatpak
+# atkAudio — Plugin for OBS Studio (Flatpak)
 
-This thing is awesome.
+`com.obsproject.Studio.Plugin.atkAudio` is a [JUCE](https://www.juce.com/)-based plugin for [OBS Studio](https://www.obsproject.com/) that lets you interact directly with audio and MIDI hardware, connect to OBS audio sources, and surface output audio as new OBS sources — useful for complex audio-processing setups.
 
-## Running on Wayland
+This repo ships that plugin as an **extension Flatpak** for OBS (`com.obsproject.Studio`). It is built and released by GitHub Actions; there is no Flathub listing, so it is installed from the release asset directly (see below).
+
+## What's in this repo
+
+- `com.obsproject.Studio.Plugin.atkAudio.yaml` — flatpak-builder manifest (the build definition for the extension).
+- `com.obsproject.Studio.Plugin.atkAudio.metainfo.xml` — appstream metadata (name, summary, release history).
+- `0001-*.patch`, `0003-*.patch` — build patches applied on top of the atkAudio source.
+- `.github/workflows/build-flatpak.yaml` — CI that builds the extension and publishes a slim `.flatpak` to each release.
+- `README.md` — this file.
+
+## Getting the flatpak
+
+Releases are tagged `vX.Y.Z`. Each tag publishes a single, self-contained asset:
+
+```
+atkAudioForOBS-<version>.flatpak
+```
+
+(There is no `.flatpakref` and no separate pages/website download — the `.flatpak` file is the only thing you need.)
+
+The latest version is **v0.35.0**. Download `atkAudioForOBS-0.35.0.flatpak` from the [releases page](https://github.com/madalee-com/com.obsproject.Studio.Plugin.atkAudio/releases) (or, if you cloned this repo, from the tag's attached asset).
+
+## Installing (post-install steps)
+
+The plugin ships as a **self-contained Flatpak bundle**, so installation is a single command — no Flatpak remote or `*.flatpakref` is required:
+
+```bash
+flatpak install atkAudioForOBS-0.35.0.flatpak
+```
+
+Then just launch OBS normally and open the **atkAudio** plugin from the plugins menu. That's it — nothing else to configure to get started.
+
+### Running on Wayland (important)
 
 The editor opens fine on X11, but **crashes under a pure Wayland session** (no X11 socket visible to the flatpak) with a segfault inside the JUCE window code.
 
@@ -21,6 +53,6 @@ The editor opens fine on X11, but **crashes under a pure Wayland session** (no X
 
   This override is a per-client launch setting (`~/.local/share/flatpak/overrides/com.obsproject.Studio`); it cannot be baked into this plugin's build.
 
-<img width="481" height="517" alt="image" src="https://github.com/user-attachments/assets/8897a198-ed1f-4b95-af51-84b7f8e90422" />
+## How the build works (optional detail)
 
-<img width="1319" height="1038" alt="image" src="https://github.com/user-attachments/assets/879f07a8-743f-42b7-93f5-b076ed20a31a" />
+CI uses `flatpak-builder` with `build-bundle: false`, then runs `flatpak build-bundle` manually against flatpak-builder's export repository. This deliberately avoids the static-delta bundling that other recipes do — it keeps the release asset slim (~10 MB) instead of ~100+ MB, and `flatpak install <file>.flatpak` validates the commit metadata out of the box.
