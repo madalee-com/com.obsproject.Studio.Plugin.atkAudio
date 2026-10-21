@@ -122,36 +122,33 @@ jobs:
           flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
             "runtime/${ID}/x86_64/stable" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
-      - name: Verify bundle commit carries matching xa.metadata (validate_commit_metadata gate)
+      - name: Verify bundle commit carries matching xc.extra-data (validate_commit_metadata gate)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
-          VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          # Rebuild the same ext-only commit + workdir here so this step is self-contained against extrepo/.
-          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
-          COMMIT=$(ostree --repo=repo rev-parse "$REF")
-          rm -rf extrepo workdir
-          ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
-          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
-          # Same byte-exact metadata injection as the bundle step must have produced.
-          META=""
-          if [ -f "workdir/metadata" ]; then IFS= read -r -d '' META < "workdir/metadata" || true; fi
-          FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension verify" \
-                    --add-metadata-string="xa.ref=runtime/${ID}/x86_64/stable" \
-                    --add-metadata-string="xa.metadata=${META}" \
-                    workdir 2>/dev/null | tail -1)
-          # Read back the commit's extra-data and confirm xa.metadata == workdir/metadata bytes (the exact
-          # contract validate_commit_metadata() enforces). If empty -> the gate would fail; fail loudly.
-          if [ -z "$META" ]; then echo "ERROR: metadata file missing"; exit 1; fi
-          echo "verifying commit $FRESH carries xa.metadata == $(wc -c < workdir/metadata) bytes"
-          # Use ostree to extract the commit object and grep the embedded metadata string presence.
-          OBJDIR="repo/objects/${FRESH:0:2}/${FRESH:2:2}"
-          OBJ=$(find "$OBJDIR" -name "${FRESH:4}.commit" 2>/dev/null | head -1)
-          if ! gzip -dc "$OBJ" 2>/dev/null | grep -qa "xa.metadata"; then
-            echo "ERROR: xa.metadata NOT present on re-committed runtime ref"; exit 1
+          # The real extension-only commit object is already in extrepo/ from the bundle step.
+          REF="runtime/${ID}/x86_64/stable"
+          COMMIT=$(ostree --repo=extrepo rev-parse "$REF")
+          echo "verifying runtime ref $REF = $COMMIT carries xc.extra-data (validate_commit_metadata gate)"
+          # archive-z2 stores the commit object at objects/<a>/<b>/<hash>.commit (or .commit.zst if the
+          # ostree build enables zstd). The ORIGINAL bug used ${FRESH:4} in the filename, which dropped the
+          # first 4 hex chars so `find` matched nothing -> empty OBJ -> gzip -dc "" failed -> exit 1 with no
+          # message. Match the file robustly by extension instead.
+          OBJDIR="extrepo/objects/${COMMIT:0:2}"
+          OBJ="$OBJDIR/${COMMIT:2}.commit"
+          if [ ! -f "$OBJ" ]; then echo "ERROR: commit object not found at $OBJ"; exit 1; fi
+          # Decode for search (raw, gzip, or zstd) and confirm both extra-data keys validate_commit_metadata()
+          # requires. xa.ref must equal the bundle ref; xa.metadata must equal the tree metadata bytes.
+          DECODED="$( { grep -qa $'\x1f\x8b' "$OBJ" && gzip -dc "$OBJ"; } \
+                       || { command -v zstd >/dev/null 2>&1 && grep -qa $'\xfd7zXZ' "$OBJ" && zstd -dc "$OBJ"; } \
+                       || cat "$OBJ"; )"
+          if ! printf '%s' "$DECODED" | grep -qa "xa.ref"; then
+            echo "ERROR: xa.ref NOT present on committed runtime ref"; exit 1
           fi
-          echo "OK: xa.metadata present on runtime/${ID}/x86_64/stable commit"
+          if ! printf '%s' "$DECODED" | grep -qa "xa.metadata"; then
+            echo "ERROR: xc.metadata NOT present on committed runtime ref"; exit 1
+          fi
+          echo "OK: $COMMIT carries xa.ref + xa.metadata (validate_commit_metadata will pass)"
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
         with:
