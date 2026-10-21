@@ -234,7 +234,6 @@ jobs:
           make_latest: true
           preserve_order: true
           files: |
-            atkOBS2.flatpakref
             release/atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
       - name: Verify plain bundle (no static-delta metadata)
         run: |
