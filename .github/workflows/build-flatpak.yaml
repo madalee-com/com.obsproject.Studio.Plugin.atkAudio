@@ -34,107 +34,41 @@ jobs:
           repo-dir: repo
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
-      # Emit a plain extension bundle (~17MB, no static-delta bloat).
-      #
-      # A build-extension always emits its own .metadata with a [Runtime] block, but that block does NOT cause the
-      # runtime to be embedded into the bundle (host-verified: a fresh archive-z2 repo + an `ext/<id>/x86_64/stable`
-      # ref bundles content-only). The old ~90-117MB artifact came from static-delta base blobs of the OBS platform
-      # that flatpak-builder pulled into the export repo when auto-bundling (build-bundle: true, with --runtime-repo).
-      # We avoid that by NOT auto-bundling and by bundling only a fresh archive-z2 repo that holds the extension
-      # commit under an `ext/` ref — no platform objects are reachable, so no static-delta base can be emitted =>
-      # bundle is ~17MB with no deltas/av-style header paths. We KEEP the [Runtime]/[ExtensionOf] block in the
-      # extension .metadata: OBS reads `runtime = com.obsproject.Studio/x86_64/stable` from it to bind the plugin
-      # to the running OBS host, so stripping it broke install/load (it was NOT cosmetic).
-      - name: Build extension-only repo (strip embedded OBS platform)
-        run: |
-          set -euo pipefail
-          ID=com.obsproject.Studio.Plugin.atkAudio
-          # CI's export repo (repo/) contains this plugin's runtime commit:
-          #   runtime/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
-          # Note the ref STARTS WITH "runtime/" (not "ext/"), so any pattern anchored at the bare app-id
-          # fails. Anchor on the plugin-unique ".Plugin.atkAudio" substring AND require the trailing
-          # "/x86_64/stable"; this cannot match the OBS platform ref "com.obsproject.Studio/x86_64/stable".
-          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
-          if [ -z "$REF" ]; then
-            echo "ERROR: no ${ID} extension ref in export repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
-          fi
-          COMMIT=$(ostree --repo=repo rev-parse "$REF")
-          echo "selected plugin ref $REF = $COMMIT"
-          # Sanity: the commit must be a slim extension tree. The full OBS platform app has thousands of tree
-          # entries; this plugin has far fewer. If we accidentally picked a huge tree, bail instead of
-          # shipping a bloated bundle.
-          N=$(ostree --repo=repo ls -R "$COMMIT" 2>/dev/null | wc -l)
-          echo "plugin commit tree entries = $N"
-          if [ "$N" -gt 2000 ]; then
-            echo "ERROR: selected commit is unexpectedly large (${N} entries) -- not an extension"; exit 1
-          fi
-          rm -rf extrepo workdir
-          # Checkout the extension tree into a FRESH archive-z2 repo that contains ONLY the extension objects
-          # (no platform objects present). No runtime installed is needed for a plain archive-z2 ostree commit.
-          ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
-          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
-          # Do NOT strip the [Runtime] block — a build-extension .metadata is:
-          #   [Runtime]\nname=…\nsdk=…\n[ExtensionOf]\nruntime = com.obsproject.Studio/x86_64/stable\n…
-          # The awk below deletes EVERYTHING between `[Runtime]` and the blank line, which removes BOTH the
-          # name/sdk AND the REQUIRED runtime = com.obsproject.Studio line from [ExtensionOf]. That leaves an
-          # extension with no declared OBS runtime → OBS refuses to load it ("won't install/open in OBS").
-          # Keep the .metadata intact (OBS reads `runtime = com.obsproject.Studio/x86_64/stable` to bind the
-          # extension to the running OBS host). This has zero size impact; the content-only ext/ ref still
-          # prevents the OBS platform from being emitted as a static-delta base. Do nothing here.
-          # Re-commit under a RUNTIME ref (runtime/<id>/...). flatpak REJECTS `ext/` refs on install
-          # ("ext/... is not application or runtime") — that rejection was the original INSTALL-TIME failure.
-          # A runtime/<id> ref installs cleanly with `flatpak install <file>.flatpak` and lands in the correct
-          # OBS extension path (OBS recognizes the com.obsproject.Studio.Plugin.* prefix for its extension point).
-          # This still bundles content-only: no --runtime-repo is passed, so the OBS platform objects are NOT
-          # pulled into this archive-z2 bundle => stays slim (~10-17MB) while remaining installable.
-          # CRITICAL: set the commit's extra-data so `flatpak install` deploy-time check
-          # validate_commit_metadata() (flatpak-dir.c) passes. That function hard-fails when the
-          # "xa.metadata" extra-data is NULL or its bytes differ from the deployed metadata file. A plain
-          # `ostree commit` drops all extra-data, so the hand re-commit MUST carry:
-          #   xa.ref       = runtime/<id>/x86_64/stable        (must equal the bundle ref)
-          #   xa.metadata  = EXACT bytes of this extension's .metadata file (the tree's metadata)
-          # build-bundle already reads workdir/metadata for the bundle HEADER "metadata" key; validate also
-          # compares commit xa.metadata against the deployed (tree) metadata, so the stored string must be
-          # byte-identical to workdir/metadata. ostree has no --metadata=keyfile mode; use add-metadata-string
-          # with KEY=VALUE (value = everything after the first '='). Read the file bytes verbatim with
-          # `IFS= read -r -d ''` so a trailing newline is preserved (command substitution would strip it and
-          # break the byte match). flatpak stores xa.metadata as G_VARIANT_TYPE_STRING.
-          META=""
-          # NOTE: the checkout created a LOCAL dir named `workdir/` (relative), not a $WORKDIR env var.
-          if [ -f "workdir/metadata" ]; then IFS= read -r -d '' META < "workdir/metadata" || true; fi
-          echo "injected extension metadata bytes = ${#META}"
-          FRESH=$(ostree --repo=extrepo commit --branch="runtime/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension" \
-                    --add-metadata-string="xa.ref=runtime/${ID}/x86_64/stable" \
-                    --add-metadata-string="xa.metadata=${META}" \
-                    workdir 2>/dev/null | tail -1)
-          echo "fresh ext-only commit = $FRESH"
-          # Generate a flatpak summary so Pages-hosted repo is consumable by flatpak over HTTP:
-          # the client fetches summary.idx (not the raw objects). No signing key needed for install.
-          ostree summary --update --repo=extrepo 2>&1 | tail -2
-          echo "flatpak summary generated for extrepo/ (summary.idx)"
+      # Emit a plain extension bundle (~17MB, no static-delta bloat). We do NOT hand-re-commit the
+      # extension into a second ostree repo: flatpak-builder already produced a clean export `repo/` whose
+      # runtime ref `runtime/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable` bundles content-only.
+      # Bundling directly from that export repo (no --runtime-repo) emits no OBS-platform static-delta base,
+      # so the artifact stays slim. flatpak-builder already set the commit's xa.ref/xa.metadata extra-data, so
+      # `flatpak install <file>.flatpak` passes validate_commit_metadata() out of the box.
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
+          REF="runtime/${ID}/x86_64/stable"
+          # flatpak-builder's export repo/ holds the plugin commit under this runtime ref. Anchor on
+          # the plugin-unique ".Plugin.atkAudio" substring AND the trailing "/x86_64/stable"; this cannot
+          # match the OBS platform ref "com.obsproject.Studio/x86_64/stable".
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
+          if [ -z "$REF" ]; then
+            echo "ERROR: no ${ID} runtime ref in flatpak-builder export repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
+          fi
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for ${ID} (runtime ref, content-only) tag=${VER}"
-          flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
-            "runtime/${ID}/x86_64/stable" stable
+          echo "Building plain bundle from flatpak-builder export repo ref=$REF tag=${VER}"
+          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak "$REF" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Verify bundle commit carries matching xc.extra-data (validate_commit_metadata gate)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
-          # The real extension-only commit object is already in extrepo/ from the bundle step.
+          # The extension commit object is already in flatpak-builder's export repo/ under this runtime ref.
           REF="runtime/${ID}/x86_64/stable"
-          COMMIT=$(ostree --repo=extrepo rev-parse "$REF")
+          COMMIT=$(ostree --repo=repo rev-parse "$REF")
           echo "verifying runtime ref $REF = $COMMIT carries xc.extra-data (validate_commit_metadata gate)"
           # archive-z2 stores the commit object at objects/<a>/<b>/<hash>.commit (or .commit.zst if the
           # ostree build enables zstd). The ORIGINAL bug used ${FRESH:4} in the filename, which dropped the
           # first 4 hex chars so `find` matched nothing -> empty OBJ -> gzip -dc "" failed -> exit 1 with no
           # message. Match the file robustly by extension instead.
-          OBJDIR="extrepo/objects/${COMMIT:0:2}"
+           OBJDIR="repo/objects/${COMMIT:0:2}"
           OBJ="$OBJDIR/${COMMIT:2}.commit"
           if [ ! -f "$OBJ" ]; then echo "ERROR: commit object not found at $OBJ"; exit 1; fi
           # Decode for search (raw, gzip, or zstd) and confirm both extra-data keys validate_commit_metadata()
@@ -155,20 +89,6 @@ jobs:
           name: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           path: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           if-no-files-found: error
-      - name: Publish ostree repo to GitHub Pages (for .flatpakref install)
-        env:
-          # A flatpak .flatpakref's [Connection] Endpoint must be a real ostree repo served over HTTP.
-          # extrepo/ (archive-z2 + generated summary.idx) is the endpoint; flatpak fetches summary.idx,
-          # objects/sha256/.. and refs/.. as static files from Pages. The .flatpak bundle alone CANNOT be
-          # installed (flatpak rejects ext refs: "ext/... is not application or runtime"), so this Pages
-          # repo is the actual install endpoint users hit via `flatpak install atkOBS2.flatpakref`.
-          PAGES_REPO: com.obsproject.Studio.Plugin.atkAudio
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: ./extrepo
-
   release:
     runs-on: ubuntu-latest
     needs: [flatpak]
@@ -208,21 +128,6 @@ jobs:
             echo
             git log --pretty=format:'- %s (%h)' -n 60 $RANGE
           } > CHANGELOG_BODY.md
-      - name: Emit .flatpakref (install endpoint)
-        run: |
-          VER="${{ steps.version.outputs.version }}"
-          ID=com.obsproject.Studio.Plugin.atkAudio
-          # The flatpak bundle CANNOT be installed directly (flatpak rejects ext refs).
-          # This .flatpakref points at the Pages-hosted ostree repo published in the flatpak job.
-          cat > atkOBS2.flatpakref <<EOF
-          [Flatpak Ref]
-          Ref=${ID}
-          Arch=x86_64
-          Branch=stable
-          [Connection]
-          Endpoint=https://madalee-com.github.io/com.obsproject.Studio.Plugin.atkAudio/
-          EOF
-          echo "--- atkOBS2.flatpakref ---"; cat atkOBS2.flatpakref
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
