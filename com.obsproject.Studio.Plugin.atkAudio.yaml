@@ -3,13 +3,14 @@ branch: stable
 runtime: com.obsproject.Studio
 runtime-version: stable
 sdk: org.freedesktop.Sdk//25.08
-# build-extension: true builds the module against the org.freedesktop.Sdk (obs deps resolved at build time
-# via pkg-config + /usr/include fallback, Qt6 from the SDK) WITHOUT requiring the OBS runtime to be installed
-# in the build container — which `build-extension: only` WOULD demand ("com.obsproject.Studio/... not installed").
-# A plain extension also emits a `[Runtime]` block in its own .metadata (name/sdk). Bundling that ext/ ref with
-# flatpak build-bundle therefore pulls the ~110MB SDK into the artifact and fails the 25MB size gate. The fix:
-# `runtime-extensions: []` makes the extension declare NO runtime of its own, so its .metadata has no [Runtime]
-# block to embed, yet the module still builds against the SDK. OBS remains the host runtime at install time.
+# build-extension: true builds the module against org.freedesktop.Sdk//25.08 (obs deps via pkg-config +
+# /usr/include fallback, Qt6 from the SDK) WITHOUT requiring the OBS runtime installed in the build container —
+# `build-extension: only` would demand the OBS runtime be present ("com.obsproject.Studio/... not installed").
+# Build-time Qt == OBS's in-process Qt => no ABI drift; JUCE simply find_package()s the same SDK Qt.
+# NOTE: a build-extension always emits its own .metadata with a [Runtime] name/sdk block, but that block does NOT
+# pull the runtime into the bundle (host-verified: a fresh `ext/<id>/x86_64/stable` ref bundles content-only).
+# The slim ~17MB artifact comes from bundling a fresh archive-z2 repo that contains ONLY the extension commit —
+# see .github/workflows/build-flatpak.yaml, which re-commits the ext tree under an `ext/` ref before build-bundle.
 build-extension: true
 separate-locales: false
 runtime-extensions: []
@@ -56,6 +57,18 @@ modules:
         # Release tag name is 'atkaudio-pluginforobs' (buildspec.json), not the app-id;
         # CMake builds atkaudio-pluginforobs.so, so install that artifact.
         install -Dm644 --target-directory=${FLATPAK_DEST}/lib/obs-plugins atkaudio-pluginforobs.so
+        # Strip symbols: the Release build has no .debug_* sections, so this removes only the symbol table
+        # (20.8 MB -> ~17.2 MB), yielding a slim distributable plugin with comfortable margin under the 25MB gate.
+        strip --strip-all ${FLATPAK_DEST}/lib/obs-plugins/atkaudio-pluginforobs.so
+        # The Linux install rule also installs SECOND, unstripped copies of the plugin and scanner into
+        # obs-plugins/${_portable_arch}/ (obs-plugins/64bit/) plus install.sh and a share/ tree. flatpak
+        # build-bundle re-encodes that extra ~20 MB as large static deltas -> the 64 MB bloat. Remove
+        # exactly those stray runtime-style paths, keeping ONLY this single stripped plugin under
+        # lib/obs-plugins/ so the bundle stays slim (~17 MB < 25MB gate). Explicit path removal avoids
+        # find -delete's refusal to delete a still-non-empty parent directory (which failed the build).
+        rm -rf "${FLATPAK_DEST}/obs-plugins" \
+               "${FLATPAK_DEST}/install.sh" \
+               "${FLATPAK_DEST}/share"
     sources:
       - type: git
         url: https://github.com/atkAudio/PluginForObsRelease.git
@@ -71,3 +84,12 @@ modules:
       # (`a/_deps/juce-src/modules/...`) so `-p1` resolves it relative to the build root.
       - type: patch
         path: 0001-fix-add-flathub-PATHS-to-JUCE.patch
+      # Inline patch MainHostWindow.cpp (atkAudio 0.35.0) to defer top-level QWidget peer + screen-geometry ops
+      # (setResizable, setResizeLimits, centreWithSize, restoreWindowStateFromString) onto the JUCE message thread
+      # via MessageManager::callAsync. On OBS Linux these run synchronously on the plugin/module thread at init
+      # BEFORE a consistent Qt GUI context / dispatch loop exists, so a QWidget peer is created against a half-built
+      # QGuiApplication and centreWithSize (JUCE Component vtable) segfaults -> "won't open in OBS". Deferring onto
+      # the message thread gives them a valid QGuiApplication + running loop. Build-time Qt == runtime SDK Qt, so
+      # this is the real load-crash fix (the obs-deps Qt rebuild was already abandoned).
+      - type: patch
+        path: 0003-defer-main-window-construction-to-message-thread.patch

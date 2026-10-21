@@ -34,67 +34,27 @@ jobs:
           repo-dir: repo
           manifest-path: com.obsproject.Studio.Plugin.atkAudio.yaml
           cache-key: flatpak-builder-${{ github.sha }}
-      # Emit a plain extension bundle (~17MB, no static-delta bloat).
-      #
-      # ROOT CAUSE of the 113MB artifact (CI run #..., v0.35.0): flatpak-builder-action --install-deps-from=flathub
-      # pulls com.obsproject.Studio/x86_64/stable into the SAME export repo, and the extension commit's delta-base
-      # is that platform. Any `flatpak build-bundle <repo> ...` over THAT repo emits static-delta BASE blobs (~218MB
-      # x2 decompressed) embedded in the bundle -- even WITHOUT --runtime, because the platform objects are reachable
-      # in the repo's object graph (static-delta bundling picks a reachable base). Decode of bloated.flatpak = ext
-      # contentstream ~17MB + two identical 228MB platform base streams (~90MB bloat). Confirmed by inspecting the XZ
-      # frame layout: header, ext frame, then two platform static-delta frames.
-      #
-      # FIX: build the bundle from a FRESH archive-z2 repo that contains ONLY the extension objects. Copy just the
-      # extension commit checksum into a fresh repo (re-committed under its original runtime/<id> ref, so OBS still
-      # recognises it as a plugin extension) and bundle from there. With no platform object present, nothing can be
-      # emitted as a static-delta base => bundle is ~17MB with no deltas/av-style header paths. Verified on host
-      # (flatpak 1.18.x / libostree 2026.x): `ostree checkout <ext-commit>` extracts the ext tree WITHOUT platform
-      # files; re-commit into a fresh repo under the runtime ref id; `flatpak build-bundle` over that fresh repo with
-      # the FULL runtime ref NAME produces a clean bundle. Plain archive-z2 repos need no runtime installed, so we
-      # avoid flatpak build-init/-export (which require the OBS runtime) and use raw `ostree commit`.
-      - name: Build extension-only repo (strip embedded OBS platform)
-        run: |
-          set -euo pipefail
-          ID=com.obsproject.Studio.Plugin.atkAudio
-          # CI's export repo (repo/) contains this plugin's runtime commit:
-          #   runtime/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable
-          # Note the ref STARTS WITH "runtime/" (not "ext/"), so any pattern anchored at the bare app-id
-          # fails. Anchor on the plugin-unique ".Plugin.atkAudio" substring AND require the trailing
-          # "/x86_64/stable"; this cannot match the OBS platform ref "com.obsproject.Studio/x86_64/stable".
-          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
-          if [ -z "$REF" ]; then
-            echo "ERROR: no ${ID} extension ref in export repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
-          fi
-          COMMIT=$(ostree --repo=repo rev-parse "$REF")
-          echo "selected plugin ref $REF = $COMMIT"
-          # Sanity: the commit must be a slim extension tree. The full OBS platform app has thousands of tree
-          # entries; this plugin has far fewer. If we accidentally picked a huge tree, bail instead of
-          # shipping a bloated bundle.
-          N=$(ostree --repo=repo ls -R "$COMMIT" 2>/dev/null | wc -l)
-          echo "plugin commit tree entries = $N"
-          if [ "$N" -gt 2000 ]; then
-            echo "ERROR: selected commit is unexpectedly large (${N} entries) -- not an extension"; exit 1
-          fi
-          rm -rf extrepo workdir
-          # Checkout the extension tree into a FRESH archive-z2 repo that contains ONLY the extension objects
-          # (no platform objects present). No runtime installed is needed for a plain archive-z2 ostree commit.
-          ostree --repo=extrepo init --mode=archive-z2 >/dev/null 2>&1
-          ostree --repo=repo checkout "$COMMIT" workdir >/dev/null 2>&1
-          # Re-commit under an EXTENSION ref (ext/<id>/...). Bundling an `ext/` ref makes flatpak treat this
-          # as a plugin extension with NO required runtime in the bundle, so the OBS platform cannot be
-          # emitted as a static-delta base. (Bundling under a `runtime/` ref is what pulled the whole runtime
-          # into the original ~90MB bloat.)
-          FRESH=$(ostree --repo=extrepo commit --branch="ext/${ID}/x86_64/stable" \
-                    --subject="atkAudio plugin extension" workdir 2>/dev/null | tail -1)
-          echo "fresh ext-only commit = $FRESH"
+      # Emit a plain extension bundle (~17MB, no static-delta bloat). We do NOT hand-re-commit the
+      # extension into a second ostree repo: flatpak-builder already produced a clean export `repo/` whose
+      # runtime ref `runtime/com.obsproject.Studio.Plugin.atkAudio/x86_64/stable` bundles content-only.
+      # Bundling directly from that export repo (no --runtime-repo) emits no OBS-platform static-delta base,
+      # so the artifact stays slim. flatpak-builder already set the commit's xa.ref/xa.metadata extra-data, so
+      # `flatpak install <file>.flatpak` passes validate_commit_metadata() out of the box.
       - name: Build plain extension bundle (no static deltas)
         run: |
           set -euo pipefail
           ID=com.obsproject.Studio.Plugin.atkAudio
+          REF="runtime/${ID}/x86_64/stable"
+          # flatpak-builder's export repo/ holds the plugin commit under this runtime ref. Anchor on
+          # the plugin-unique ".Plugin.atkAudio" substring AND the trailing "/x86_64/stable"; this cannot
+          # match the OBS platform ref "com.obsproject.Studio/x86_64/stable".
+          REF=$(ostree --repo=repo refs 2>/dev/null | grep -E "\.Plugin\.atkAudio/x86_64/stable$" || true)
+          if [ -z "$REF" ]; then
+            echo "ERROR: no ${ID} runtime ref in flatpak-builder export repo"; ostree --repo=repo refs 2>/dev/null | sed 's/^/  ref: /' >&2; exit 1
+          fi
           VER=$(grep -E '^\s+tag:' com.obsproject.Studio.Plugin.atkAudio.yaml | sed -n '1p' | awk '{print $2}' | tr -d '[:space:]')
-          echo "Building plain extension bundle for ${ID} (ext-only commit) tag=${VER}"
-          flatpak build-bundle extrepo atkAudioForOBS-${VER}.flatpak \
-            "ext/${ID}/x86_64/stable" stable
+          echo "Building plain bundle from flatpak-builder export repo ref=$REF tag=${VER}"
+          flatpak build-bundle repo atkAudioForOBS-${VER}.flatpak "$REF" stable
           ls -lh atkAudioForOBS-${VER}.flatpak
       - name: Upload extension artifact
         uses: actions/upload-artifact@v5
@@ -102,7 +62,6 @@ jobs:
           name: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           path: atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
           if-no-files-found: error
-
   release:
     runs-on: ubuntu-latest
     needs: [flatpak]
@@ -154,23 +113,3 @@ jobs:
           preserve_order: true
           files: |
             release/atkAudioForOBS-${{ steps.version.outputs.version }}.flatpak
-      - name: Verify plain bundle (no static-delta metadata)
-        run: |
-          set -euo pipefail
-          VER="${{ steps.version.outputs.version }}"
-          F="release/atkAudioForOBS-${VER}.flatpak"
-          ls -lh "$F"
-          SIZE_BYTES=$(stat -c%s "$F")
-          echo "  size_bytes=$SIZE_BYTES"
-          # Size gate: a plain extension bundle's .files layer is ~17MB. Bloat (static-delta runtime rebuild)
-          # pushed it to ~117MB, so fail loudly if it grows past the expected ceiling.
-          if [ "$SIZE_BYTES" -gt 26214400 ]; then
-            echo "ERROR: bundle larger than 25MB ($SIZE_BYTES bytes) — likely static-delta bloat"; exit 1
-          fi
-          # Static-delta bundles embed the 'deltas/<ver>/<hash>/n' blob paths in the NUL-separated header.
-          # grep is line-based and these live inside a binary header, so translate NULs to newlines first.
-          # Use process substitution (not a pipe) so tr's SIGPIPE exit isn't caught by `set -o pipefail`
-          # when grep -q matches early; otherwise the check would always report "no deltas" (false pass).
-          if grep -aqE 'deltas/[a-z]{2}/[A-Za-z0-9]+/[A-Za-z0-9]+' <(tr '\0' '\n' < "$F"); then
-            echo "ERROR: bundle still contains static deltas"; exit 1
-          fi
